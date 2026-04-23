@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
@@ -85,6 +87,7 @@ class AccountConfig(BaseModel):
     name: str = "Main"
     enabled: bool = True
     session_file: str = "sessions/main.json"
+    notify: dict[str, Any] | None = None
 
 
 class AppConfig(BaseModel):
@@ -103,6 +106,21 @@ class AppConfig(BaseModel):
 
     def enabled_accounts(self) -> list[AccountConfig]:
         return [account for account in self.accounts if account.enabled]
+
+    def notify_for_account(self, account: AccountConfig) -> NotifyConfig:
+        data = self.notify.model_dump(mode="json")
+        if account.notify:
+            data = deep_merge(data, deepcopy(account.notify))
+        return NotifyConfig.model_validate(data)
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
 
 
 def load_config(path: Path | None = None) -> tuple[AppConfig, Path]:

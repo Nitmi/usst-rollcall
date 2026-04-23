@@ -36,8 +36,18 @@ accounts:
     name: Main
     enabled: true
     session_file: sessions/main.json
+    notify:
+      bark:
+        enabled: false
+        key: ""
   - id: backup
     name: Backup
     enabled: false
     session_file: sessions/backup.json
+    notify:
+      console:
+        enabled: true
+      bark:
+        enabled: false
+        key: ""
 state_file: state.sqlite3

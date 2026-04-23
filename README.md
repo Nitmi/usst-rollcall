@@ -7,6 +7,7 @@ This project currently implements the safe first stage:
 - Query `GET /api/radar/rollcalls?api_version=1.1.0`.
 - Persist refreshed `X-SESSION-ID` and `session` cookie.
 - Support multiple accounts with independent session files.
+- Support account-specific notification overrides.
 - Store seen rollcalls in SQLite to avoid duplicate notifications.
 - Send notifications through console, Bark, Gotify, or email.
 - Keep the actual sign-in submit endpoint as a future extension until a real sign-in capture is available.
@@ -55,6 +56,7 @@ uv run usst-rollcall watch --account main
 uv run usst-rollcall watch --all
 uv run usst-rollcall watch --interval 5 --ticks 3
 uv run usst-rollcall notify-test
+uv run usst-rollcall notify-test --account main
 ```
 
 ## Accounts
@@ -74,6 +76,40 @@ accounts:
 ```
 
 Each account has an independent `X-SESSION-ID` / cookie store. The SQLite state table uses `(account_id, rollcall_key)` as the uniqueness key, so two accounts can receive notifications for the same rollcall independently.
+
+Account notification config can override the global `notify` block:
+
+```yaml
+notify:
+  console:
+    enabled: true
+  bark:
+    enabled: false
+    key: ""
+
+accounts:
+  - id: main
+    name: My account
+    enabled: true
+    session_file: sessions/main.json
+    notify:
+      bark:
+        enabled: true
+        key: main-bark-key
+
+  - id: friend
+    name: Friend
+    enabled: true
+    session_file: sessions/friend.json
+    notify:
+      console:
+        enabled: false
+      bark:
+        enabled: true
+        key: friend-bark-key
+```
+
+The merge behavior is shallow by channel and recursive inside each channel: omitted account fields inherit global defaults, configured fields override them. During `watch --all`, every account uses its own merged notification config.
 
 ## Notification
 

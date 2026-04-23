@@ -55,9 +55,15 @@ def where() -> None:
 @app.command("accounts")
 def accounts(config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None) -> None:
     config, resolved_config_path = load_config(config_path)
-    table = Table("ID", "Name", "Enabled", "Session File")
+    table = Table("ID", "Name", "Enabled", "Session File", "Notify Override")
     for account in config.accounts:
-        table.add_row(account.id, account.name, str(account.enabled), str(resolve_data_path(resolved_config_path, account.session_file)))
+        table.add_row(
+            account.id,
+            account.name,
+            str(account.enabled),
+            str(resolve_data_path(resolved_config_path, account.session_file)),
+            "yes" if account.notify else "no",
+        )
     console.print(table)
 
 
@@ -105,10 +111,10 @@ def poll_once_command(
 ) -> None:
     config, resolved_config_path, state_store = _load_runtime(config_path)
     accounts_to_poll = config.enabled_accounts() if all_accounts else [_select_account(config, account_id)]
-    notifier = Notifier(config.notify) if notify else None
     try:
         with state_store:
             for account in accounts_to_poll:
+                notifier = Notifier(config.notify_for_account(account)) if notify else None
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     response = client.get_rollcalls()
@@ -139,7 +145,6 @@ def watch_command(
     config, resolved_config_path, state_store = _load_runtime(config_path)
     accounts_to_watch = config.enabled_accounts() if all_accounts else [_select_account(config, account_id)]
     interval_seconds = interval if interval is not None else config.watch.interval_seconds
-    notifier = Notifier(config.notify)
 
     def on_tick(tick: int, new_count: int) -> None:
         console.print(f"tick={tick} new_rollcalls={new_count}")
@@ -148,6 +153,7 @@ def watch_command(
         with state_store:
             if len(accounts_to_watch) == 1:
                 account = accounts_to_watch[0]
+                notifier = Notifier(config.notify_for_account(account))
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     watch(
@@ -167,6 +173,7 @@ def watch_command(
                 tick += 1
                 total_new = 0
                 for account in accounts_to_watch:
+                    notifier = Notifier(config.notify_for_account(account))
                     session_store = _session_store(resolved_config_path, account)
                     with TronClassClient(config.http, session_store) as client:
                         total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
@@ -184,12 +191,22 @@ def watch_command(
 
 
 @app.command("notify-test")
-def notify_test(config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None) -> None:
+def notify_test(
+    config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    account_id: Annotated[str | None, typer.Option("--account", "-a", help="Test account-specific notification.")] = None,
+) -> None:
     config, _resolved_config_path = load_config(config_path)
-    sent = Notifier(config.notify).send(
+    if account_id:
+        account = _select_account(config, account_id)
+        notify_config = config.notify_for_account(account)
+        body = f"Notification channel is working for account: {account.name}."
+    else:
+        notify_config = config.notify
+        body = "Notification channel is working."
+    sent = Notifier(notify_config).send(
         NotificationMessage(
             title="USST rollcall test",
-            body="Notification channel is working.",
+            body=body,
         )
     )
     console.print(f"Sent via: {', '.join(sent) if sent else '<none>'}")
