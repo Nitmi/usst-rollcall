@@ -31,5 +31,13 @@ notify:
     from_addr: ""
     to_addrs: []
     use_tls: true
-session_file: session.json
+accounts:
+  - id: main
+    name: Main
+    enabled: true
+    session_file: sessions/main.json
+  - id: backup
+    name: Backup
+    enabled: false
+    session_file: sessions/backup.json
 state_file: state.sqlite3

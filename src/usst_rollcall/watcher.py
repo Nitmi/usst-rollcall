@@ -9,9 +9,10 @@ from .notify import Notifier
 from .state import StateStore
 
 
-def build_rollcall_message(rollcall: Rollcall) -> NotificationMessage:
+def build_rollcall_message(account_name: str, rollcall: Rollcall) -> NotificationMessage:
     body = "\n".join(
         [
+            f"Account: {account_name}",
             f"Course: {rollcall.display_title}",
             f"Type: {rollcall.type_label}",
             f"Status: {rollcall.status or 'unknown'}",
@@ -21,20 +22,28 @@ def build_rollcall_message(rollcall: Rollcall) -> NotificationMessage:
     return NotificationMessage(title="USST rollcall detected", body=body)
 
 
-def poll_once(client: TronClassClient, state: StateStore, notifier: Notifier | None = None) -> list[Rollcall]:
+def poll_once(
+    account_id: str,
+    account_name: str,
+    client: TronClassClient,
+    state: StateStore,
+    notifier: Notifier | None = None,
+) -> list[Rollcall]:
     response = client.get_rollcalls()
     new_rollcalls: list[Rollcall] = []
     for rollcall in response.rollcalls:
-        is_new = state.upsert_seen(rollcall)
+        is_new = state.upsert_seen(account_id, rollcall)
         if is_new:
             new_rollcalls.append(rollcall)
             if notifier:
-                notifier.send(build_rollcall_message(rollcall))
-                state.mark_notified(rollcall.key)
+                notifier.send(build_rollcall_message(account_name, rollcall))
+                state.mark_notified(account_id, rollcall.key)
     return new_rollcalls
 
 
 def watch(
+    account_id: str,
+    account_name: str,
     client: TronClassClient,
     state: StateStore,
     notifier: Notifier,
@@ -46,7 +55,7 @@ def watch(
     tick = 0
     while True:
         tick += 1
-        new_rollcalls = poll_once(client, state, notifier)
+        new_rollcalls = poll_once(account_id, account_name, client, state, notifier)
         if on_tick:
             on_tick(tick, len(new_rollcalls))
         if stop_after is not None and tick >= stop_after:

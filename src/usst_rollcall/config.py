@@ -80,13 +80,29 @@ class NotifyConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
 
 
+class AccountConfig(BaseModel):
+    id: str = "main"
+    name: str = "Main"
+    enabled: bool = True
+    session_file: str = "sessions/main.json"
+
+
 class AppConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
+    accounts: list[AccountConfig] = Field(default_factory=lambda: [AccountConfig()])
 
-    session_file: str = "session.json"
     state_file: str = "state.sqlite3"
+
+    def get_account(self, account_id: str) -> AccountConfig:
+        for account in self.accounts:
+            if account.id == account_id:
+                return account
+        raise KeyError(f"Unknown account: {account_id}")
+
+    def enabled_accounts(self) -> list[AccountConfig]:
+        return [account for account in self.accounts if account.enabled]
 
 
 def load_config(path: Path | None = None) -> tuple[AppConfig, Path]:

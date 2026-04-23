@@ -32,24 +32,64 @@ class StateStore:
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS rollcall_events (
-                rollcall_key TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL DEFAULT 'main',
+                rollcall_key TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 course_title TEXT,
                 type_label TEXT,
                 status TEXT,
                 notification_sent_at TEXT,
-                raw_json TEXT NOT NULL
+                raw_json TEXT NOT NULL,
+                PRIMARY KEY (account_id, rollcall_key)
             )
             """
         )
+        self._migrate_account_id()
         self.conn.commit()
 
-    def upsert_seen(self, rollcall: Rollcall) -> bool:
+    def _migrate_account_id(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(rollcall_events)").fetchall()
+        }
+        if "account_id" in columns:
+            return
+        self.conn.execute("ALTER TABLE rollcall_events RENAME TO rollcall_events_old")
+        self.conn.execute(
+            """
+            CREATE TABLE rollcall_events (
+                account_id TEXT NOT NULL DEFAULT 'main',
+                rollcall_key TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                course_title TEXT,
+                type_label TEXT,
+                status TEXT,
+                notification_sent_at TEXT,
+                raw_json TEXT NOT NULL,
+                PRIMARY KEY (account_id, rollcall_key)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO rollcall_events (
+                account_id, rollcall_key, first_seen_at, last_seen_at, course_title,
+                type_label, status, notification_sent_at, raw_json
+            )
+            SELECT 'main', rollcall_key, first_seen_at, last_seen_at, course_title,
+                   type_label, status, notification_sent_at, raw_json
+            FROM rollcall_events_old
+            """
+        )
+        self.conn.execute("DROP TABLE rollcall_events_old")
+
+    def upsert_seen(self, account_id: str, rollcall: Rollcall) -> bool:
         key = rollcall.key
         existing = self.conn.execute(
-            "SELECT rollcall_key FROM rollcall_events WHERE rollcall_key = ?",
-            (key,),
+            "SELECT rollcall_key FROM rollcall_events WHERE account_id = ? AND rollcall_key = ?",
+            (account_id, key),
         ).fetchone()
         timestamp = now_iso()
         if existing:
@@ -57,20 +97,21 @@ class StateStore:
                 """
                 UPDATE rollcall_events
                 SET last_seen_at = ?, status = ?, raw_json = ?
-                WHERE rollcall_key = ?
+                WHERE account_id = ? AND rollcall_key = ?
                 """,
-                (timestamp, rollcall.status, rollcall.model_dump_json(), key),
+                (timestamp, rollcall.status, rollcall.model_dump_json(), account_id, key),
             )
             self.conn.commit()
             return False
         self.conn.execute(
             """
             INSERT INTO rollcall_events (
-                rollcall_key, first_seen_at, last_seen_at, course_title,
+                account_id, rollcall_key, first_seen_at, last_seen_at, course_title,
                 type_label, status, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                account_id,
                 key,
                 timestamp,
                 timestamp,
@@ -83,9 +124,13 @@ class StateStore:
         self.conn.commit()
         return True
 
-    def mark_notified(self, rollcall_key: str) -> None:
+    def mark_notified(self, account_id: str, rollcall_key: str) -> None:
         self.conn.execute(
-            "UPDATE rollcall_events SET notification_sent_at = ? WHERE rollcall_key = ?",
-            (now_iso(), rollcall_key),
+            """
+            UPDATE rollcall_events
+            SET notification_sent_at = ?
+            WHERE account_id = ? AND rollcall_key = ?
+            """,
+            (now_iso(), account_id, rollcall_key),
         )
         self.conn.commit()
