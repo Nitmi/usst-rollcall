@@ -59,6 +59,20 @@ uv run usst-rollcall notify-test
 uv run usst-rollcall notify-test --account main
 ```
 
+## Watch Alerts
+
+`watch` does not stop on a polling error. If an account fails to query rollcalls, it sends an account-specific notification and keeps polling. `HTTP 401` means the stored `X-SESSION-ID` or `session` cookie is expired and must be refreshed with `session-set`.
+
+Alert notifications are throttled per account and error type:
+
+```yaml
+watch:
+  interval_seconds: 10.0
+  alert_cooldown_seconds: 1800.0
+```
+
+With the default value, the same account receives at most one notification for the same error type every 30 minutes.
+
 ## Accounts
 
 Configure accounts in `config.yaml`:

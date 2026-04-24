@@ -8,6 +8,7 @@ http:
 watch:
   interval_seconds: 10.0
   notify_when_empty: false
+  alert_cooldown_seconds: 1800.0
 notify:
   console:
     enabled: true

@@ -11,6 +11,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
 class StateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -42,6 +46,18 @@ class StateStore:
                 notification_sent_at TEXT,
                 raw_json TEXT NOT NULL,
                 PRIMARY KEY (account_id, rollcall_key)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_events (
+                account_id TEXT NOT NULL,
+                alert_key TEXT NOT NULL,
+                first_sent_at TEXT NOT NULL,
+                last_sent_at TEXT NOT NULL,
+                sent_count INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (account_id, alert_key)
             )
             """
         )
@@ -132,5 +148,37 @@ class StateStore:
             WHERE account_id = ? AND rollcall_key = ?
             """,
             (now_iso(), account_id, rollcall_key),
+        )
+        self.conn.commit()
+
+    def should_send_alert(self, account_id: str, alert_key: str, cooldown_seconds: float) -> bool:
+        row = self.conn.execute(
+            """
+            SELECT last_sent_at
+            FROM alert_events
+            WHERE account_id = ? AND alert_key = ?
+            """,
+            (account_id, alert_key),
+        ).fetchone()
+        if not row:
+            return True
+        if cooldown_seconds <= 0:
+            return True
+        last_sent_at = parse_iso(row["last_sent_at"])
+        elapsed = datetime.now(timezone.utc) - last_sent_at
+        return elapsed.total_seconds() >= cooldown_seconds
+
+    def mark_alert_sent(self, account_id: str, alert_key: str) -> None:
+        timestamp = now_iso()
+        self.conn.execute(
+            """
+            INSERT INTO alert_events (
+                account_id, alert_key, first_sent_at, last_sent_at, sent_count
+            ) VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(account_id, alert_key) DO UPDATE SET
+                last_sent_at = excluded.last_sent_at,
+                sent_count = sent_count + 1
+            """,
+            (account_id, alert_key, timestamp, timestamp),
         )
         self.conn.commit()

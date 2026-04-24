@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from .client import TronClassClient
+from .client import TronClassClient, TronClassError
 from .models import NotificationMessage, Rollcall
 from .notify import Notifier
 from .state import StateStore
@@ -20,6 +20,36 @@ def build_rollcall_message(account_name: str, rollcall: Rollcall) -> Notificatio
         ]
     )
     return NotificationMessage(title="USST rollcall detected", body=body)
+
+
+def build_error_message(account_name: str, error: TronClassError) -> NotificationMessage:
+    status = error.status_code or "unknown"
+    hint = "Refresh X-SESSION-ID/session cookie and run session-set." if error.status_code == 401 else "Check network, session, and API availability."
+    body = "\n".join(
+        [
+            f"Account: {account_name}",
+            f"Status: {status}",
+            f"Error: {error}",
+            f"Action: {hint}",
+        ]
+    )
+    return NotificationMessage(title="USST rollcall watcher error", body=body)
+
+
+def notify_error_once(
+    account_id: str,
+    account_name: str,
+    state: StateStore,
+    notifier: Notifier,
+    error: TronClassError,
+    cooldown_seconds: float,
+) -> bool:
+    alert_key = f"poll_error:{error.status_code or 'unknown'}"
+    if not state.should_send_alert(account_id, alert_key, cooldown_seconds):
+        return False
+    notifier.send(build_error_message(account_name, error))
+    state.mark_alert_sent(account_id, alert_key)
+    return True
 
 
 def poll_once(
@@ -49,13 +79,18 @@ def watch(
     notifier: Notifier,
     *,
     interval_seconds: float,
+    alert_cooldown_seconds: float,
     stop_after: int | None = None,
     on_tick: Callable[[int, int], None] | None = None,
 ) -> None:
     tick = 0
     while True:
         tick += 1
-        new_rollcalls = poll_once(account_id, account_name, client, state, notifier)
+        try:
+            new_rollcalls = poll_once(account_id, account_name, client, state, notifier)
+        except TronClassError as error:
+            notify_error_once(account_id, account_name, state, notifier, error, alert_cooldown_seconds)
+            new_rollcalls = []
         if on_tick:
             on_tick(tick, len(new_rollcalls))
         if stop_after is not None and tick >= stop_after:

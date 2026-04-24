@@ -43,6 +43,7 @@ class HttpConfig(BaseModel):
 class WatchConfig(BaseModel):
     interval_seconds: float = 10.0
     notify_when_empty: bool = False
+    alert_cooldown_seconds: float = 1800.0
 
 
 class BarkConfig(BaseModel):

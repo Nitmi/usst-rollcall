@@ -10,7 +10,9 @@ from .session import SessionStore
 
 
 class TronClassError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class TronClassClient:
@@ -66,7 +68,10 @@ class TronClassClient:
         )
         self._persist_response_session(response)
         if response.status_code >= 400:
-            raise TronClassError(f"GET /api/radar/rollcalls failed: HTTP {response.status_code}")
+            raise TronClassError(
+                f"GET /api/radar/rollcalls failed: HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
         try:
             return RollcallResponse.model_validate(response.json())
         except ValueError as exc:

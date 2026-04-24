@@ -13,7 +13,7 @@ from .models import NotificationMessage
 from .notify import Notifier
 from .session import SessionStore, redact
 from .state import StateStore
-from .watcher import poll_once, watch
+from .watcher import notify_error_once, poll_once, watch
 
 
 app = typer.Typer(help="USST TronClass rollcall watcher.")
@@ -163,6 +163,7 @@ def watch_command(
                         state_store,
                         notifier,
                         interval_seconds=interval_seconds,
+                        alert_cooldown_seconds=config.watch.alert_cooldown_seconds,
                         stop_after=ticks,
                         on_tick=on_tick,
                     )
@@ -176,7 +177,17 @@ def watch_command(
                     notifier = Notifier(config.notify_for_account(account))
                     session_store = _session_store(resolved_config_path, account)
                     with TronClassClient(config.http, session_store) as client:
-                        total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
+                        try:
+                            total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
+                        except TronClassError as error:
+                            notify_error_once(
+                                account.id,
+                                account.name,
+                                state_store,
+                                notifier,
+                                error,
+                                config.watch.alert_cooldown_seconds,
+                            )
                 console.print(f"tick={tick} accounts={len(accounts_to_watch)} new_rollcalls={total_new}")
                 if ticks is not None and tick >= ticks:
                     return
