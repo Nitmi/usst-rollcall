@@ -20,7 +20,20 @@ uv run usst-rollcall init-config
 uv run usst-rollcall where
 ```
 
-The default config path is under `%LOCALAPPDATA%\usst-rollcall\config.yaml`.
+Default config and runtime paths:
+
+| Platform | Config path | Default runtime files |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\usst-rollcall\config.yaml` | `%LOCALAPPDATA%\usst-rollcall\sessions\*.json`, `%LOCALAPPDATA%\usst-rollcall\state.sqlite3` |
+| Linux / VPS | `~/.config/usst-rollcall/config.yaml` | `~/.config/usst-rollcall/sessions/*.json`, `~/.config/usst-rollcall/state.sqlite3` |
+
+Override the config directory with:
+
+```bash
+export USST_ROLLCALL_CONFIG_DIR=/path/to/usst-rollcall-config
+```
+
+`usst-rollcall where` prints the active default config path.
 
 To install the CLI as a standalone command without the `uv run` prefix:
 
@@ -67,6 +80,22 @@ uv run usst-rollcall watch --interval 5 --ticks 3
 uv run usst-rollcall notify-test
 uv run usst-rollcall notify-test --account main
 ```
+
+Command defaults:
+
+| Command | Default behavior |
+| --- | --- |
+| `accounts` | Lists configured accounts and whether each account has a notification override. |
+| `session-set` | Writes session data for `--account main` unless another account is specified. |
+| `session-show` | Shows session data for `--account main` unless another account is specified. |
+| `poll-once` | Polls `--account main` once. It does not notify unless `--notify` is set. |
+| `poll-once --all` | Polls all enabled accounts once. |
+| `watch` | Watches `--account main` continuously. |
+| `watch --all` | Watches all enabled accounts and uses each account's merged notification config. |
+| `notify-test` | Tests the global `notify` config only. It is not `--all`. |
+| `notify-test --account main` | Tests the merged notification config for `main`. |
+
+Use the installed command name directly after `uv tool install . --force`; the examples use `uv run` only for development.
 
 ## Watch Alerts
 
