@@ -22,6 +22,15 @@ uv run usst-rollcall where
 
 The default config path is under `%LOCALAPPDATA%\usst-rollcall\config.yaml`.
 
+To install the CLI as a standalone command without the `uv run` prefix:
+
+```powershell
+uv tool install . --force
+usst-rollcall --help
+```
+
+On Linux/VPS, run the same command from the project directory. If the command is not found, ensure the uv tool bin directory is in `PATH`.
+
 ## Session
 
 For now, extract `X-SESSION-ID` from a logged-in request such as:
