@@ -120,19 +120,21 @@ usst-rollcall notify-test
 
 ## 开启自动监控
 
-前台运行：
-
-```bash
-usst-rollcall watch
-```
-
-监控所有已启用账号：
+推荐监控所有已启用账号：
 
 ```bash
 usst-rollcall watch --all
 ```
 
+只监控默认账号：
+
+```bash
+usst-rollcall watch
+```
+
 默认情况下，程序只会在 `07:30-20:30` 之间请求签到接口。其他时间程序会保持运行，但不会检查签到。
+
+启动后会先显示运行摘要，你可以看到当前是否启用了 `--all`、是否启用了 `--sign`、正在监控哪些账号。
 
 如果部署在 VPS，建议用 `supervisor`、`systemd`、Docker 或其他进程管理工具守护运行。
 
@@ -157,7 +159,7 @@ usst-rollcall poll-once --sign
 监控时开启：
 
 ```bash
-usst-rollcall watch --sign
+usst-rollcall watch --all --sign
 ```
 
 说明：
@@ -222,8 +224,9 @@ usst-rollcall watch --all
 | `usst-rollcall session-show` | 查看当前登录凭据状态 |
 | `usst-rollcall poll-once` | 立即检查一次签到 |
 | `usst-rollcall poll-once --notify` | 检查一次，有新签到就通知 |
-| `usst-rollcall watch` | 持续监控默认账号 |
 | `usst-rollcall watch --all` | 持续监控所有启用账号 |
+| `usst-rollcall watch --all --sign` | 持续监控所有启用账号，并临时开启自动签到 |
+| `usst-rollcall watch` | 只持续监控默认账号 |
 | `usst-rollcall notify-test` | 测试通知 |
 
 ## 更新
@@ -249,7 +252,7 @@ pip install -U usst-rollcall
 解决方法：在 supervisor 启动命令里写完整路径，例如：
 
 ```bash
-/root/.local/bin/usst-rollcall watch --all
+/root/.local/bin/usst-rollcall watch --all --sign
 ```
 
 ### 提示 401 或查询失败

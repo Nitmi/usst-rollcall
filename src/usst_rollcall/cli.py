@@ -11,7 +11,7 @@ from rich.table import Table
 
 from . import __version__
 from .client import TronClassClient, TronClassError
-from .config import AccountConfig, AppConfig, default_config_path, load_config, resolve_data_path, write_default_config
+from .config import AccountConfig, AppConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
 from .models import NotificationMessage, SignResult
 from .notify import Notifier
 from .session import SessionStore, redact
@@ -53,6 +53,50 @@ def _select_account(config: AppConfig, account_id: str) -> AccountConfig:
     except KeyError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
+
+
+def _sign_config_for_account(config: AppConfig, account: AccountConfig, override: bool | None) -> SignConfig:
+    sign_config = config.sign_for_account(account)
+    if override is None:
+        return sign_config
+    return sign_config.model_copy(update={"enabled": override})
+
+
+def _sign_override_label(value: bool | None) -> str:
+    if value is True:
+        return "enabled by --sign"
+    if value is False:
+        return "disabled by --no-sign"
+    return "from config"
+
+
+def _print_watch_start(
+    config: AppConfig,
+    accounts: list[AccountConfig],
+    *,
+    all_accounts: bool,
+    account_id: str,
+    interval_seconds: float,
+    sign_override: bool | None,
+) -> None:
+    scope = "all enabled accounts (--all active)" if all_accounts else f"single account: {account_id} (--all not active)"
+    console.print("[bold]USST rollcall watch started[/bold]")
+    console.print(f"Version: {package_version()}")
+    console.print(f"Scope: {scope}")
+    console.print(f"Auto sign: {_sign_override_label(sign_override)}")
+    console.print(f"Active window: {config.watch.active_start}-{config.watch.active_end}")
+    console.print(f"Interval: {interval_seconds:g}s")
+
+    table = Table("Account", "Name", "Auto Sign", "Notify Override")
+    for account in accounts:
+        sign_config = _sign_config_for_account(config, account, sign_override)
+        table.add_row(
+            account.id,
+            account.name,
+            "enabled" if sign_config.enabled else "disabled",
+            "yes" if account.notify else "no",
+        )
+    console.print(table)
 
 
 @app.command("init-config")
@@ -138,9 +182,7 @@ def poll_once_command(
         with state_store:
             for account in accounts_to_poll:
                 notifier = Notifier(config.notify_for_account(account)) if notify else None
-                sign_config = config.sign_for_account(account)
-                if sign is not None:
-                    sign_config = sign_config.model_copy(update={"enabled": sign})
+                sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     response = client.get_rollcalls()
@@ -187,6 +229,14 @@ def watch_command(
     config, resolved_config_path, state_store = _load_runtime(config_path)
     accounts_to_watch = config.enabled_accounts() if all_accounts else [_select_account(config, account_id)]
     interval_seconds = interval if interval is not None else config.watch.interval_seconds
+    _print_watch_start(
+        config,
+        accounts_to_watch,
+        all_accounts=all_accounts,
+        account_id=account_id,
+        interval_seconds=interval_seconds,
+        sign_override=sign,
+    )
 
     def on_tick(tick: int, new_count: int) -> None:
         console.print(f"tick={tick} new_rollcalls={new_count}")
@@ -196,9 +246,7 @@ def watch_command(
             if len(accounts_to_watch) == 1:
                 account = accounts_to_watch[0]
                 notifier = Notifier(config.notify_for_account(account))
-                sign_config = config.sign_for_account(account)
-                if sign is not None:
-                    sign_config = sign_config.model_copy(update={"enabled": sign})
+                sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     watch(
@@ -226,9 +274,7 @@ def watch_command(
                 if is_within_active_window(datetime.now().astimezone(), active_start, active_end):
                     for account in accounts_to_watch:
                         notifier = Notifier(config.notify_for_account(account))
-                        sign_config = config.sign_for_account(account)
-                        if sign is not None:
-                            sign_config = sign_config.model_copy(update={"enabled": sign})
+                        sign_config = _sign_config_for_account(config, account, sign)
                         session_store = _session_store(resolved_config_path, account)
                         with TronClassClient(config.http, session_store) as client:
                             try:
