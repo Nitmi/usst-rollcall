@@ -12,7 +12,24 @@ This project currently implements the safe first stage:
 - Send notifications through console, Bark, Gotify, or email.
 - Optionally submit supported rollcalls automatically. Auto sign is disabled by default.
 
-## Setup
+## Install
+
+After the package is published to PyPI, users can install and update without cloning the repository:
+
+```bash
+uv tool install usst-rollcall
+uv tool upgrade usst-rollcall
+usst-rollcall --help
+```
+
+Alternative install methods:
+
+```bash
+pipx install usst-rollcall
+pipx upgrade usst-rollcall
+```
+
+For development from source:
 
 ```powershell
 uv sync
@@ -35,7 +52,7 @@ export USST_ROLLCALL_CONFIG_DIR=/path/to/usst-rollcall-config
 
 `usst-rollcall where` prints the active default config path.
 
-To install the CLI as a standalone command without the `uv run` prefix:
+To install the local checkout as a standalone command without the `uv run` prefix:
 
 ```powershell
 uv tool install . --force
@@ -43,6 +60,24 @@ usst-rollcall --help
 ```
 
 On Linux/VPS, run the same command from the project directory. If the command is not found, ensure the uv tool bin directory is in `PATH`.
+
+## Release
+
+This repository includes a tag-based GitHub Actions release workflow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds the wheel/source distribution, publishes to PyPI, and creates a GitHub release with the build artifacts.
+
+Before the first release:
+
+- Make the GitHub repository public if you want the source code to be publicly visible.
+- Create or claim the `usst-rollcall` project on PyPI.
+- Configure PyPI Trusted Publishing for repository `Nitmi/usst-rollcall`, workflow `.github/workflows/release.yml`, environment `pypi`.
+- Bump `version` in `pyproject.toml` before every new release tag.
 
 ## Session
 

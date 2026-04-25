@@ -6,6 +6,8 @@ readme = "README.md"
 authors = [
     { name = "Nitmi", email = "0@123778.xyz" }
 ]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
@@ -15,6 +17,21 @@ dependencies = [
     "rich>=15.0.0",
     "typer>=0.24.2",
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+keywords = ["usst", "tronclass", "rollcall", "cli", "notification"]
+
+[project.urls]
+Homepage = "https://github.com/Nitmi/usst-rollcall"
+Repository = "https://github.com/Nitmi/usst-rollcall"
+Issues = "https://github.com/Nitmi/usst-rollcall/issues"
 
 [project.scripts]
 usst-rollcall = "usst_rollcall.cli:main"
