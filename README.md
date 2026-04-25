@@ -1,164 +1,143 @@
 # usst-rollcall
 
-USST TronClass rollcall watcher and notifier.
+上海理工大学一网畅学课程签到提醒和自动签到工具。
 
-This project currently implements the safe first stage:
+它可以在后台定时检查是否有课程签到，并在发现签到时发送通知。你也可以按需开启自动签到。
 
-- Query `GET /api/radar/rollcalls?api_version=1.1.0`.
-- Persist refreshed `X-SESSION-ID` and `session` cookie.
-- Support multiple accounts with independent session files.
-- Support account-specific notification overrides.
-- Store seen rollcalls in SQLite to avoid duplicate notifications.
-- Send notifications through console, Bark, Gotify, or email.
-- Optionally submit supported rollcalls automatically. Auto sign is disabled by default.
+## 功能
 
-## Install
+- 检查课程签到
+- 有签到时推送通知
+- 支持 Bark、Gotify、邮件、控制台通知
+- 支持多个账号
+- 支持数字签到自动提交
+- 支持雷达签到自动提交，但需要自己配置坐标
+- 默认只在 `07:30-20:30` 检查，减少无意义请求
 
-After the package is published to PyPI, users can install and update without cloning the repository:
+二维码签到暂不支持自动提交。
+
+## 安装
+
+推荐使用 `uv` 安装，适合长期运行命令行工具：
 
 ```bash
 uv tool install usst-rollcall
+```
+
+更新：
+
+```bash
 uv tool upgrade usst-rollcall
+```
+
+也可以使用 `pip` 安装：
+
+```bash
+pip install usst-rollcall
+```
+
+如果使用 `pip`，建议放在虚拟环境里，避免影响系统 Python。
+
+安装后检查命令是否可用：
+
+```bash
 usst-rollcall --help
 ```
 
-Alternative install methods:
+## 第一次使用
+
+### 1. 生成配置文件
 
 ```bash
-pipx install usst-rollcall
-pipx upgrade usst-rollcall
+usst-rollcall init-config
 ```
 
-For development from source:
-
-```powershell
-uv sync
-uv run usst-rollcall init-config
-uv run usst-rollcall where
-```
-
-Default config and runtime paths:
-
-| Platform | Config path | Default runtime files |
-| --- | --- | --- |
-| Windows | `%LOCALAPPDATA%\usst-rollcall\config.yaml` | `%LOCALAPPDATA%\usst-rollcall\sessions\*.json`, `%LOCALAPPDATA%\usst-rollcall\state.sqlite3` |
-| Linux / VPS | `~/.config/usst-rollcall/config.yaml` | `~/.config/usst-rollcall/sessions/*.json`, `~/.config/usst-rollcall/state.sqlite3` |
-
-Override the config directory with:
+查看配置文件位置：
 
 ```bash
-export USST_ROLLCALL_CONFIG_DIR=/path/to/usst-rollcall-config
+usst-rollcall where
 ```
 
-`usst-rollcall where` prints the active default config path.
+常见位置：
 
-To install the local checkout as a standalone command without the `uv run` prefix:
-
-```powershell
-uv tool install . --force
-usst-rollcall --help
-```
-
-On Linux/VPS, run the same command from the project directory. If the command is not found, ensure the uv tool bin directory is in `PATH`.
-
-## Release
-
-This repository includes a tag-based GitHub Actions release workflow:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The workflow builds the wheel/source distribution, publishes to PyPI, and creates a GitHub release with the build artifacts.
-
-Before the first release:
-
-- Make the GitHub repository public if you want the source code to be publicly visible.
-- Create or claim the `usst-rollcall` project on PyPI.
-- Configure PyPI Trusted Publishing for repository `Nitmi/usst-rollcall`, workflow `.github/workflows/release.yml`, environment `pypi`.
-- Bump `version` in `pyproject.toml` before every new release tag.
-
-## Session
-
-For now, extract `X-SESSION-ID` from a logged-in request such as:
-
-```text
-GET https://1906.usst.edu.cn/api/radar/rollcalls?api_version=1.1.0
-```
-
-Then save it:
-
-```powershell
-uv run usst-rollcall accounts
-uv run usst-rollcall session-set --account main --x-session-id "V2-..."
-uv run usst-rollcall session-show
-```
-
-If you also have the `session` cookie value, pass:
-
-```powershell
-uv run usst-rollcall session-set --account main --x-session-id "V2-..." --session-cookie "V2-..."
-```
-
-## Commands
-
-```powershell
-uv run usst-rollcall poll-once
-uv run usst-rollcall poll-once --account main
-uv run usst-rollcall poll-once --all
-uv run usst-rollcall poll-once --notify
-uv run usst-rollcall poll-once --sign
-uv run usst-rollcall watch
-uv run usst-rollcall watch --account main
-uv run usst-rollcall watch --all
-uv run usst-rollcall watch --sign
-uv run usst-rollcall watch --interval 5 --ticks 3
-uv run usst-rollcall notify-test
-uv run usst-rollcall notify-test --account main
-```
-
-Command defaults:
-
-| Command | Default behavior |
+| 系统 | 配置文件 |
 | --- | --- |
-| `accounts` | Lists configured accounts and whether each account has a notification override. |
-| `session-set` | Writes session data for `--account main` unless another account is specified. |
-| `session-show` | Shows session data for `--account main` unless another account is specified. |
-| `poll-once` | Polls `--account main` once. It does not notify unless `--notify` is set. Auto sign follows `sign.enabled`. |
-| `poll-once --all` | Polls all enabled accounts once. |
-| `poll-once --sign` | Enables auto sign for this run, even if `sign.enabled` is false in config. |
-| `poll-once --no-sign` | Disables auto sign for this run, even if `sign.enabled` is true in config. |
-| `watch` | Watches `--account main` continuously. Auto sign follows `sign.enabled`. |
-| `watch --all` | Watches all enabled accounts and uses each account's merged notification config. |
-| `watch --sign` | Enables auto sign while watching, even if `sign.enabled` is false in config. |
-| `watch --no-sign` | Disables auto sign while watching, even if `sign.enabled` is true in config. |
-| `notify-test` | Tests the global `notify` config only. It is not `--all`. |
-| `notify-test --account main` | Tests the merged notification config for `main`. |
+| Windows | `%LOCALAPPDATA%\usst-rollcall\config.yaml` |
+| Linux / VPS | `~/.config/usst-rollcall/config.yaml` |
 
-Use the installed command name directly after `uv tool install . --force`; the examples use `uv run` only for development.
+### 2. 填入登录凭据
 
-## Watch Alerts
+你需要从已登录的一网畅学请求里获取 `X-SESSION-ID`。
 
-`watch` does not stop on a polling error. If an account fails to query rollcalls, it sends an account-specific notification and keeps polling. `HTTP 401` means the stored `X-SESSION-ID` or `session` cookie is expired and must be refreshed with `session-set`.
+保存到工具里：
 
-Alert notifications are throttled per account and error type:
+```bash
+usst-rollcall session-set --x-session-id "这里填你的 X-SESSION-ID"
+```
+
+如果你也拿到了 `session` cookie，可以一起保存：
+
+```bash
+usst-rollcall session-set --x-session-id "这里填你的 X-SESSION-ID" --session-cookie "这里填 session cookie"
+```
+
+查看是否保存成功：
+
+```bash
+usst-rollcall session-show
+```
+
+### 3. 测试能否查询签到
+
+```bash
+usst-rollcall poll-once
+```
+
+如果能正常输出课程签到数量，说明配置基本可用。
+
+## 配置通知
+
+打开配置文件，找到 `notify`。
+
+### Bark 示例
 
 ```yaml
-watch:
-  interval_seconds: 10.0
-  alert_cooldown_seconds: 1800.0
-  active_start: "07:30"
-  active_end: "20:30"
+notify:
+  bark:
+    enabled: true
+    server: https://api.day.app
+    key: 你的 Bark key
 ```
 
-With the default value, the same account receives at most one notification for the same error type every 30 minutes.
+测试通知：
 
-`watch` only sends rollcall API requests during the active time window. Outside `active_start` and `active_end`, the process stays alive and sleeps between ticks, but it does not query the backend. The default window is `07:30` to `20:30` in the server's local timezone.
+```bash
+usst-rollcall notify-test
+```
 
-## Auto Sign
+如果手机能收到消息，通知配置成功。
 
-Auto sign is off by default. Enable it in `config.yaml` only after the session for that account is valid:
+## 开启自动监控
+
+前台运行：
+
+```bash
+usst-rollcall watch
+```
+
+监控所有已启用账号：
+
+```bash
+usst-rollcall watch --all
+```
+
+默认情况下，程序只会在 `07:30-20:30` 之间请求签到接口。其他时间程序会保持运行，但不会检查签到。
+
+如果部署在 VPS，建议用 `supervisor`、`systemd`、Docker 或其他进程管理工具守护运行。
+
+## 开启自动签到
+
+自动签到默认关闭。需要你手动打开配置文件，把 `sign.enabled` 改为 `true`：
 
 ```yaml
 sign:
@@ -166,110 +145,124 @@ sign:
   number_enabled: true
   radar_enabled: false
   notify_result: true
-  device_id: your-stable-device-id
+```
+
+临时开启一次：
+
+```bash
+usst-rollcall poll-once --sign
+```
+
+监控时开启：
+
+```bash
+usst-rollcall watch --sign
+```
+
+说明：
+
+- 数字签到：默认支持。
+- 雷达签到：需要你自己配置经纬度，并开启 `radar_enabled`。
+- 二维码签到：暂不支持。
+
+雷达签到配置示例：
+
+```yaml
+sign:
+  enabled: true
+  radar_enabled: true
   radar_location:
-    latitude: null
-    longitude: null
+    latitude: 31.000000
+    longitude: 121.000000
     accuracy: 35.0
 ```
 
-Supported methods:
+## 多账号
 
-| Method | Status |
+编辑配置文件里的 `accounts`：
+
+```yaml
+accounts:
+  - id: main
+    name: 我的账号
+    enabled: true
+    session_file: sessions/main.json
+
+  - id: friend
+    name: 朋友账号
+    enabled: true
+    session_file: sessions/friend.json
+```
+
+给不同账号保存登录凭据：
+
+```bash
+usst-rollcall session-set --account main --x-session-id "main 的 X-SESSION-ID"
+usst-rollcall session-set --account friend --x-session-id "friend 的 X-SESSION-ID"
+```
+
+运行所有账号：
+
+```bash
+usst-rollcall watch --all
+```
+
+每个账号可以单独配置通知和自动签到。
+
+## 常用命令
+
+| 命令 | 作用 |
 | --- | --- |
-| Number rollcall | Supported. The tool reads `GET /api/rollcall/{rollcall_id}/student_rollcalls`, extracts `number_code` / `numberCode`, then submits `PUT /api/rollcall/{rollcall_id}/answer_number_rollcall`. |
-| Radar rollcall | Supported only when `radar_enabled: true` and `radar_location.latitude` / `radar_location.longitude` are configured. |
-| QR code rollcall | Not implemented until a real QR sign-in capture is available. |
+| `usst-rollcall where` | 查看配置文件位置 |
+| `usst-rollcall accounts` | 查看账号列表 |
+| `usst-rollcall session-set` | 保存登录凭据 |
+| `usst-rollcall session-show` | 查看当前登录凭据状态 |
+| `usst-rollcall poll-once` | 立即检查一次签到 |
+| `usst-rollcall poll-once --notify` | 检查一次，有新签到就通知 |
+| `usst-rollcall watch` | 持续监控默认账号 |
+| `usst-rollcall watch --all` | 持续监控所有启用账号 |
+| `usst-rollcall notify-test` | 测试通知 |
 
-Per-account sign config overrides the global `sign` block:
+## 更新
 
-```yaml
-accounts:
-  - id: main
-    name: My account
-    enabled: true
-    session_file: sessions/main.json
-    sign:
-      enabled: true
-      device_id: main-device-id
+如果使用 `uv tool` 安装：
+
+```bash
+uv tool upgrade usst-rollcall
 ```
 
-The SQLite state stores one sign result per `(account_id, rollcall_key)` to avoid repeated submits. If you need to retry a specific rollcall after changing config, delete that row from `state.sqlite3` or use a fresh state file.
+如果使用 `pip` 安装：
 
-## Accounts
-
-Configure accounts in `config.yaml`:
-
-```yaml
-accounts:
-  - id: main
-    name: My account
-    enabled: true
-    session_file: sessions/main.json
-  - id: friend
-    name: Friend
-    enabled: true
-    session_file: sessions/friend.json
+```bash
+pip install -U usst-rollcall
 ```
 
-Each account has an independent `X-SESSION-ID` / cookie store. The SQLite state table uses `(account_id, rollcall_key)` as the uniqueness key, so two accounts can receive notifications for the same rollcall independently.
+## 常见问题
 
-Account notification config can override the global `notify` block:
+### supervisor 里找不到 `usst-rollcall`
 
-```yaml
-notify:
-  console:
-    enabled: true
-  bark:
-    enabled: false
-    key: ""
+这是因为 supervisor 的 `PATH` 和你登录 shell 的 `PATH` 不一样。
 
-accounts:
-  - id: main
-    name: My account
-    enabled: true
-    session_file: sessions/main.json
-    notify:
-      bark:
-        enabled: true
-        key: main-bark-key
+解决方法：在 supervisor 启动命令里写完整路径，例如：
 
-  - id: friend
-    name: Friend
-    enabled: true
-    session_file: sessions/friend.json
-    notify:
-      console:
-        enabled: false
-      bark:
-        enabled: true
-        key: friend-bark-key
+```bash
+/root/.local/bin/usst-rollcall watch --all
 ```
 
-The merge behavior is shallow by channel and recursive inside each channel: omitted account fields inherit global defaults, configured fields override them. During `watch --all`, every account uses its own merged notification config.
+### 提示 401 或查询失败
 
-## Notification
+通常是登录凭据过期了。重新获取 `X-SESSION-ID` 后再执行：
 
-Edit config to enable Bark:
-
-```yaml
-notify:
-  bark:
-    enabled: true
-    server: https://api.day.app
-    key: your-bark-key
+```bash
+usst-rollcall session-set --x-session-id "新的 X-SESSION-ID"
 ```
 
-Console notification is enabled by default.
+### 没收到通知
 
-## Next Reverse Step
+先运行：
 
-When a real rollcall is active, capture the submit request. Expected candidates:
-
-```text
-PUT /api/rollcall/{rollcall_id}/answer
-PUT /api/rollcall/{rollcall_id}/answer_number_rollcall
-GET /api/rollcall/{rollcall_id}/student_rollcalls
+```bash
+usst-rollcall notify-test
 ```
 
-The current implementation covers the public number/radar endpoint patterns. A real QR sign-in capture is still needed before QR auto sign can be implemented safely.
+如果测试通知也收不到，优先检查 Bark key、Gotify token 或邮箱配置。
