@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
 from datetime import datetime
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -10,11 +10,12 @@ from rich.table import Table
 
 from .client import TronClassClient, TronClassError
 from .config import AccountConfig, AppConfig, default_config_path, load_config, resolve_data_path, write_default_config
-from .models import NotificationMessage
+from .models import NotificationMessage, SignResult
 from .notify import Notifier
 from .session import SessionStore, redact
+from .signer import attempt_sign
 from .state import StateStore
-from .watcher import is_within_active_window, notify_error_once, parse_clock, poll_once, watch
+from .watcher import build_sign_message, is_within_active_window, notify_error_once, parse_clock, poll_once, watch
 
 
 app = typer.Typer(help="USST TronClass rollcall watcher.")
@@ -109,6 +110,7 @@ def poll_once_command(
     account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
     all_accounts: Annotated[bool, typer.Option("--all", help="Poll all enabled accounts.")] = False,
     notify: Annotated[bool, typer.Option(help="Send notification for newly seen rollcalls.")] = False,
+    sign: Annotated[bool | None, typer.Option("--sign/--no-sign", help="Override auto sign for this run.")] = None,
 ) -> None:
     config, resolved_config_path, state_store = _load_runtime(config_path)
     accounts_to_poll = config.enabled_accounts() if all_accounts else [_select_account(config, account_id)]
@@ -116,6 +118,9 @@ def poll_once_command(
         with state_store:
             for account in accounts_to_poll:
                 notifier = Notifier(config.notify_for_account(account)) if notify else None
+                sign_config = config.sign_for_account(account)
+                if sign is not None:
+                    sign_config = sign_config.model_copy(update={"enabled": sign})
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     response = client.get_rollcalls()
@@ -126,6 +131,21 @@ def poll_once_command(
                             body = f"Account: {account.name}\n{rollcall.model_dump_json(indent=2)}"
                             notifier.send(NotificationMessage(title="USST rollcall detected", body=body))
                             state_store.mark_notified(account.id, rollcall.key)
+                        if sign_config.enabled and not state_store.has_sign_result(account.id, rollcall.key):
+                            try:
+                                result = attempt_sign(client, rollcall, sign_config)
+                            except TronClassError as error:
+                                result = SignResult(
+                                    attempted=True,
+                                    success=False,
+                                    method=rollcall.type_label,
+                                    message=str(error),
+                                    rollcall_id=rollcall.key,
+                                )
+                            state_store.mark_sign_result(account.id, rollcall.key, result)
+                            if notify and notifier and sign_config.notify_result:
+                                notifier.send(build_sign_message(account.name, rollcall, result))
+                            console.print(f"  sign={result.method}:{result.message}")
                         console.print(
                             f"- [{account.id}] {rollcall.key} {rollcall.display_title} "
                             f"[{rollcall.type_label}] status={rollcall.status}"
@@ -141,6 +161,7 @@ def watch_command(
     account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
     all_accounts: Annotated[bool, typer.Option("--all", help="Watch all enabled accounts.")] = False,
     interval: Annotated[float | None, typer.Option(help="Override interval seconds.")] = None,
+    sign: Annotated[bool | None, typer.Option("--sign/--no-sign", help="Override auto sign while watching.")] = None,
     ticks: Annotated[int | None, typer.Option(help="Stop after N ticks, useful for testing.")] = None,
 ) -> None:
     config, resolved_config_path, state_store = _load_runtime(config_path)
@@ -155,6 +176,9 @@ def watch_command(
             if len(accounts_to_watch) == 1:
                 account = accounts_to_watch[0]
                 notifier = Notifier(config.notify_for_account(account))
+                sign_config = config.sign_for_account(account)
+                if sign is not None:
+                    sign_config = sign_config.model_copy(update={"enabled": sign})
                 session_store = _session_store(resolved_config_path, account)
                 with TronClassClient(config.http, session_store) as client:
                     watch(
@@ -167,6 +191,7 @@ def watch_command(
                         alert_cooldown_seconds=config.watch.alert_cooldown_seconds,
                         active_start=config.watch.active_start,
                         active_end=config.watch.active_end,
+                        sign_config=sign_config,
                         stop_after=ticks,
                         on_tick=on_tick,
                     )
@@ -181,10 +206,22 @@ def watch_command(
                 if is_within_active_window(datetime.now().astimezone(), active_start, active_end):
                     for account in accounts_to_watch:
                         notifier = Notifier(config.notify_for_account(account))
+                        sign_config = config.sign_for_account(account)
+                        if sign is not None:
+                            sign_config = sign_config.model_copy(update={"enabled": sign})
                         session_store = _session_store(resolved_config_path, account)
                         with TronClassClient(config.http, session_store) as client:
                             try:
-                                total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
+                                total_new += len(
+                                    poll_once(
+                                        account.id,
+                                        account.name,
+                                        client,
+                                        state_store,
+                                        notifier,
+                                        sign_config,
+                                    )
+                                )
                             except TronClassError as error:
                                 notify_error_once(
                                     account.id,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 
 from .config import HttpConfig
-from .models import RollcallResponse, SessionTokens
+from .models import RollcallResponse
 from .session import SessionStore
 
 
@@ -61,24 +62,45 @@ class TronClassClient:
         for name, value in self.tokens.cookies.items():
             self.client.cookies.set(name, value)
 
-    def get_rollcalls(self) -> RollcallResponse:
-        response = self.client.get(
-            "/api/radar/rollcalls",
-            params={"api_version": self.http_config.api_version},
-        )
+    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        response = self.client.request(method, url, **kwargs)
         self._persist_response_session(response)
         if response.status_code >= 400:
             raise TronClassError(
-                f"GET /api/radar/rollcalls failed: HTTP {response.status_code}",
+                f"{method} {url} failed: HTTP {response.status_code}",
                 status_code=response.status_code,
             )
+        return response
+
+    def _json_request(self, method: str, url: str, **kwargs: Any) -> Any:
+        response = self._request(method, url, **kwargs)
+        if not response.content:
+            return None
         try:
-            return RollcallResponse.model_validate(response.json())
+            return response.json()
         except ValueError as exc:
-            raise TronClassError("GET /api/radar/rollcalls did not return JSON") from exc
+            raise TronClassError(f"{method} {url} did not return JSON") from exc
+
+    def get_rollcalls(self) -> RollcallResponse:
+        data = self._json_request(
+            "GET",
+            "/api/radar/rollcalls",
+            params={"api_version": self.http_config.api_version},
+        )
+        return RollcallResponse.model_validate(data)
 
     def rollcall_url(self, rollcall_id: str) -> str:
         return urljoin(self.http_config.base_url, f"/api/rollcall/{rollcall_id}")
 
-    def answer_rollcall(self, _rollcall_id: str) -> None:
-        raise NotImplementedError("Submit endpoint is not implemented until a real sign-in capture is available.")
+    def get_student_rollcalls(self, rollcall_id: str) -> Any:
+        return self._json_request("GET", f"/api/rollcall/{rollcall_id}/student_rollcalls")
+
+    def answer_number_rollcall(self, rollcall_id: str, number_code: str, device_id: str) -> Any:
+        return self._json_request(
+            "PUT",
+            f"/api/rollcall/{rollcall_id}/answer_number_rollcall",
+            json={"deviceId": device_id, "numberCode": number_code},
+        )
+
+    def answer_radar_rollcall(self, rollcall_id: str, payload: dict[str, Any]) -> Any:
+        return self._json_request("PUT", f"/api/rollcall/{rollcall_id}/answer", json=payload)

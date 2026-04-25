@@ -10,7 +10,7 @@ This project currently implements the safe first stage:
 - Support account-specific notification overrides.
 - Store seen rollcalls in SQLite to avoid duplicate notifications.
 - Send notifications through console, Bark, Gotify, or email.
-- Keep the actual sign-in submit endpoint as a future extension until a real sign-in capture is available.
+- Optionally submit supported rollcalls automatically. Auto sign is disabled by default.
 
 ## Setup
 
@@ -73,9 +73,11 @@ uv run usst-rollcall poll-once
 uv run usst-rollcall poll-once --account main
 uv run usst-rollcall poll-once --all
 uv run usst-rollcall poll-once --notify
+uv run usst-rollcall poll-once --sign
 uv run usst-rollcall watch
 uv run usst-rollcall watch --account main
 uv run usst-rollcall watch --all
+uv run usst-rollcall watch --sign
 uv run usst-rollcall watch --interval 5 --ticks 3
 uv run usst-rollcall notify-test
 uv run usst-rollcall notify-test --account main
@@ -88,10 +90,14 @@ Command defaults:
 | `accounts` | Lists configured accounts and whether each account has a notification override. |
 | `session-set` | Writes session data for `--account main` unless another account is specified. |
 | `session-show` | Shows session data for `--account main` unless another account is specified. |
-| `poll-once` | Polls `--account main` once. It does not notify unless `--notify` is set. |
+| `poll-once` | Polls `--account main` once. It does not notify unless `--notify` is set. Auto sign follows `sign.enabled`. |
 | `poll-once --all` | Polls all enabled accounts once. |
-| `watch` | Watches `--account main` continuously. |
+| `poll-once --sign` | Enables auto sign for this run, even if `sign.enabled` is false in config. |
+| `poll-once --no-sign` | Disables auto sign for this run, even if `sign.enabled` is true in config. |
+| `watch` | Watches `--account main` continuously. Auto sign follows `sign.enabled`. |
 | `watch --all` | Watches all enabled accounts and uses each account's merged notification config. |
+| `watch --sign` | Enables auto sign while watching, even if `sign.enabled` is false in config. |
+| `watch --no-sign` | Disables auto sign while watching, even if `sign.enabled` is true in config. |
 | `notify-test` | Tests the global `notify` config only. It is not `--all`. |
 | `notify-test --account main` | Tests the merged notification config for `main`. |
 
@@ -114,6 +120,46 @@ watch:
 With the default value, the same account receives at most one notification for the same error type every 30 minutes.
 
 `watch` only sends rollcall API requests during the active time window. Outside `active_start` and `active_end`, the process stays alive and sleeps between ticks, but it does not query the backend. The default window is `07:30` to `20:30` in the server's local timezone.
+
+## Auto Sign
+
+Auto sign is off by default. Enable it in `config.yaml` only after the session for that account is valid:
+
+```yaml
+sign:
+  enabled: true
+  number_enabled: true
+  radar_enabled: false
+  notify_result: true
+  device_id: your-stable-device-id
+  radar_location:
+    latitude: null
+    longitude: null
+    accuracy: 35.0
+```
+
+Supported methods:
+
+| Method | Status |
+| --- | --- |
+| Number rollcall | Supported. The tool reads `GET /api/rollcall/{rollcall_id}/student_rollcalls`, extracts `number_code` / `numberCode`, then submits `PUT /api/rollcall/{rollcall_id}/answer_number_rollcall`. |
+| Radar rollcall | Supported only when `radar_enabled: true` and `radar_location.latitude` / `radar_location.longitude` are configured. |
+| QR code rollcall | Not implemented until a real QR sign-in capture is available. |
+
+Per-account sign config overrides the global `sign` block:
+
+```yaml
+accounts:
+  - id: main
+    name: My account
+    enabled: true
+    session_file: sessions/main.json
+    sign:
+      enabled: true
+      device_id: main-device-id
+```
+
+The SQLite state stores one sign result per `(account_id, rollcall_key)` to avoid repeated submits. If you need to retry a specific rollcall after changing config, delete that row from `state.sqlite3` or use a fresh state file.
 
 ## Accounts
 
@@ -191,4 +237,4 @@ PUT /api/rollcall/{rollcall_id}/answer_number_rollcall
 GET /api/rollcall/{rollcall_id}/student_rollcalls
 ```
 
-After that, implement submit logic in `TronClassClient.answer_rollcall`.
+The current implementation covers the public number/radar endpoint patterns. A real QR sign-in capture is still needed before QR auto sign can be implemented safely.

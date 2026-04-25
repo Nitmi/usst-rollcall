@@ -5,8 +5,10 @@ from collections.abc import Callable
 from datetime import datetime, time as datetime_time
 
 from .client import TronClassClient, TronClassError
-from .models import NotificationMessage, Rollcall
+from .config import SignConfig
+from .models import NotificationMessage, Rollcall, SignResult
 from .notify import Notifier
+from .signer import attempt_sign
 from .state import StateStore
 
 
@@ -48,6 +50,22 @@ def build_error_message(account_name: str, error: TronClassError) -> Notificatio
     return NotificationMessage(title="USST rollcall watcher error", body=body)
 
 
+def build_sign_message(account_name: str, rollcall: Rollcall, result: SignResult) -> NotificationMessage:
+    status = "success" if result.success else "failed" if result.attempted else "skipped"
+    body = "\n".join(
+        [
+            f"Account: {account_name}",
+            f"Course: {rollcall.display_title}",
+            f"Type: {rollcall.type_label}",
+            f"Rollcall ID: {rollcall.key}",
+            f"Sign status: {status}",
+            f"Method: {result.method}",
+            f"Message: {result.message}",
+        ]
+    )
+    return NotificationMessage(title="USST rollcall sign result", body=body)
+
+
 def notify_error_once(
     account_id: str,
     account_name: str,
@@ -70,6 +88,7 @@ def poll_once(
     client: TronClassClient,
     state: StateStore,
     notifier: Notifier | None = None,
+    sign_config: SignConfig | None = None,
 ) -> list[Rollcall]:
     response = client.get_rollcalls()
     new_rollcalls: list[Rollcall] = []
@@ -80,6 +99,20 @@ def poll_once(
             if notifier:
                 notifier.send(build_rollcall_message(account_name, rollcall))
                 state.mark_notified(account_id, rollcall.key)
+        if sign_config and sign_config.enabled and not state.has_sign_result(account_id, rollcall.key):
+            try:
+                result = attempt_sign(client, rollcall, sign_config)
+            except TronClassError as error:
+                result = SignResult(
+                    attempted=True,
+                    success=False,
+                    method=rollcall.type_label,
+                    message=str(error),
+                    rollcall_id=rollcall.key,
+                )
+            state.mark_sign_result(account_id, rollcall.key, result)
+            if notifier and sign_config.notify_result:
+                notifier.send(build_sign_message(account_name, rollcall, result))
     return new_rollcalls
 
 
@@ -94,6 +127,7 @@ def watch(
     alert_cooldown_seconds: float,
     active_start: str,
     active_end: str,
+    sign_config: SignConfig | None = None,
     stop_after: int | None = None,
     on_tick: Callable[[int, int], None] | None = None,
 ) -> None:
@@ -110,7 +144,7 @@ def watch(
             time.sleep(interval_seconds)
             continue
         try:
-            new_rollcalls = poll_once(account_id, account_name, client, state, notifier)
+            new_rollcalls = poll_once(account_id, account_name, client, state, notifier, sign_config)
         except TronClassError as error:
             notify_error_once(account_id, account_name, state, notifier, error, alert_cooldown_seconds)
             new_rollcalls = []

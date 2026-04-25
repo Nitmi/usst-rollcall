@@ -11,6 +11,20 @@ watch:
   alert_cooldown_seconds: 1800.0
   active_start: '07:30'
   active_end: '20:30'
+sign:
+  enabled: false
+  number_enabled: true
+  radar_enabled: false
+  notify_result: true
+  device_id: null
+  radar_location:
+    latitude: null
+    longitude: null
+    accuracy: 35.0
+    altitude: 0.0
+    altitude_accuracy: null
+    heading: null
+    speed: null
 notify:
   console:
     enabled: true
@@ -39,6 +53,8 @@ accounts:
     name: Main
     enabled: true
     session_file: sessions/main.json
+    sign:
+      enabled: false
     notify:
       bark:
         enabled: false
@@ -47,6 +63,8 @@ accounts:
     name: Backup
     enabled: false
     session_file: sessions/backup.json
+    sign:
+      enabled: false
     notify:
       console:
         enabled: true

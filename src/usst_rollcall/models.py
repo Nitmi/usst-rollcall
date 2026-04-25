@@ -66,3 +66,12 @@ class NotificationMessage(BaseModel):
     body: str
     url: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class SignResult(BaseModel):
+    attempted: bool
+    success: bool
+    method: str
+    message: str
+    rollcall_id: str | None = None
+    raw: Any | None = None

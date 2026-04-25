@@ -48,6 +48,25 @@ class WatchConfig(BaseModel):
     active_end: str = "20:30"
 
 
+class RadarLocationConfig(BaseModel):
+    latitude: float | None = None
+    longitude: float | None = None
+    accuracy: float = 35.0
+    altitude: float = 0.0
+    altitude_accuracy: float | None = None
+    heading: float | None = None
+    speed: float | None = None
+
+
+class SignConfig(BaseModel):
+    enabled: bool = False
+    number_enabled: bool = True
+    radar_enabled: bool = False
+    notify_result: bool = True
+    device_id: str | None = None
+    radar_location: RadarLocationConfig = Field(default_factory=RadarLocationConfig)
+
+
 class BarkConfig(BaseModel):
     enabled: bool = False
     server: str = "https://api.day.app"
@@ -91,11 +110,13 @@ class AccountConfig(BaseModel):
     enabled: bool = True
     session_file: str = "sessions/main.json"
     notify: dict[str, Any] | None = None
+    sign: dict[str, Any] | None = None
 
 
 class AppConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
+    sign: SignConfig = Field(default_factory=SignConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
     accounts: list[AccountConfig] = Field(default_factory=lambda: [AccountConfig()])
 
@@ -115,6 +136,12 @@ class AppConfig(BaseModel):
         if account.notify:
             data = deep_merge(data, deepcopy(account.notify))
         return NotifyConfig.model_validate(data)
+
+    def sign_for_account(self, account: AccountConfig) -> SignConfig:
+        data = self.sign.model_dump(mode="json")
+        if account.sign:
+            data = deep_merge(data, deepcopy(account.sign))
+        return SignConfig.model_validate(data)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

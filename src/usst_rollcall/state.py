@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import Rollcall
+from .models import Rollcall, SignResult
 
 
 def now_iso() -> str:
@@ -44,6 +44,9 @@ class StateStore:
                 type_label TEXT,
                 status TEXT,
                 notification_sent_at TEXT,
+                sign_attempted_at TEXT,
+                sign_status TEXT,
+                sign_message TEXT,
                 raw_json TEXT NOT NULL,
                 PRIMARY KEY (account_id, rollcall_key)
             )
@@ -62,6 +65,7 @@ class StateStore:
             """
         )
         self._migrate_account_id()
+        self._migrate_rollcall_event_columns()
         self.conn.commit()
 
     def _migrate_account_id(self) -> None:
@@ -83,6 +87,9 @@ class StateStore:
                 type_label TEXT,
                 status TEXT,
                 notification_sent_at TEXT,
+                sign_attempted_at TEXT,
+                sign_status TEXT,
+                sign_message TEXT,
                 raw_json TEXT NOT NULL,
                 PRIMARY KEY (account_id, rollcall_key)
             )
@@ -100,6 +107,20 @@ class StateStore:
             """
         )
         self.conn.execute("DROP TABLE rollcall_events_old")
+
+    def _migrate_rollcall_event_columns(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(rollcall_events)").fetchall()
+        }
+        migrations = {
+            "sign_attempted_at": "ALTER TABLE rollcall_events ADD COLUMN sign_attempted_at TEXT",
+            "sign_status": "ALTER TABLE rollcall_events ADD COLUMN sign_status TEXT",
+            "sign_message": "ALTER TABLE rollcall_events ADD COLUMN sign_message TEXT",
+        }
+        for column, sql in migrations.items():
+            if column not in columns:
+                self.conn.execute(sql)
 
     def upsert_seen(self, account_id: str, rollcall: Rollcall) -> bool:
         key = rollcall.key
@@ -148,6 +169,31 @@ class StateStore:
             WHERE account_id = ? AND rollcall_key = ?
             """,
             (now_iso(), account_id, rollcall_key),
+        )
+        self.conn.commit()
+
+    def has_sign_result(self, account_id: str, rollcall_key: str) -> bool:
+        row = self.conn.execute(
+            """
+            SELECT sign_attempted_at
+            FROM rollcall_events
+            WHERE account_id = ? AND rollcall_key = ?
+            """,
+            (account_id, rollcall_key),
+        ).fetchone()
+        return bool(row and row["sign_attempted_at"])
+
+    def mark_sign_result(self, account_id: str, rollcall_key: str, result: SignResult) -> None:
+        status = "success" if result.success else "skipped"
+        if result.attempted and not result.success:
+            status = "failed"
+        self.conn.execute(
+            """
+            UPDATE rollcall_events
+            SET sign_attempted_at = ?, sign_status = ?, sign_message = ?
+            WHERE account_id = ? AND rollcall_key = ?
+            """,
+            (now_iso(), status, result.message, account_id, rollcall_key),
         )
         self.conn.commit()
 
