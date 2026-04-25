@@ -44,6 +44,8 @@ class WatchConfig(BaseModel):
     interval_seconds: float = 10.0
     notify_when_empty: bool = False
     alert_cooldown_seconds: float = 1800.0
+    active_start: str = "07:30"
+    active_end: str = "20:30"
 
 
 class BarkConfig(BaseModel):

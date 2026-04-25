@@ -107,9 +107,13 @@ Alert notifications are throttled per account and error type:
 watch:
   interval_seconds: 10.0
   alert_cooldown_seconds: 1800.0
+  active_start: "07:30"
+  active_end: "20:30"
 ```
 
 With the default value, the same account receives at most one notification for the same error type every 30 minutes.
+
+`watch` only sends rollcall API requests during the active time window. Outside `active_start` and `active_end`, the process stays alive and sleeps between ticks, but it does not query the backend. The default window is `07:30` to `20:30` in the server's local timezone.
 
 ## Accounts
 

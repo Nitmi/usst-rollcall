@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated
+from datetime import datetime
 
 import typer
 from rich.console import Console
@@ -13,7 +14,7 @@ from .models import NotificationMessage
 from .notify import Notifier
 from .session import SessionStore, redact
 from .state import StateStore
-from .watcher import notify_error_once, poll_once, watch
+from .watcher import is_within_active_window, notify_error_once, parse_clock, poll_once, watch
 
 
 app = typer.Typer(help="USST TronClass rollcall watcher.")
@@ -164,30 +165,35 @@ def watch_command(
                         notifier,
                         interval_seconds=interval_seconds,
                         alert_cooldown_seconds=config.watch.alert_cooldown_seconds,
+                        active_start=config.watch.active_start,
+                        active_end=config.watch.active_end,
                         stop_after=ticks,
                         on_tick=on_tick,
                     )
                 return
 
             tick = 0
+            active_start = parse_clock(config.watch.active_start)
+            active_end = parse_clock(config.watch.active_end)
             while True:
                 tick += 1
                 total_new = 0
-                for account in accounts_to_watch:
-                    notifier = Notifier(config.notify_for_account(account))
-                    session_store = _session_store(resolved_config_path, account)
-                    with TronClassClient(config.http, session_store) as client:
-                        try:
-                            total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
-                        except TronClassError as error:
-                            notify_error_once(
-                                account.id,
-                                account.name,
-                                state_store,
-                                notifier,
-                                error,
-                                config.watch.alert_cooldown_seconds,
-                            )
+                if is_within_active_window(datetime.now().astimezone(), active_start, active_end):
+                    for account in accounts_to_watch:
+                        notifier = Notifier(config.notify_for_account(account))
+                        session_store = _session_store(resolved_config_path, account)
+                        with TronClassClient(config.http, session_store) as client:
+                            try:
+                                total_new += len(poll_once(account.id, account.name, client, state_store, notifier))
+                            except TronClassError as error:
+                                notify_error_once(
+                                    account.id,
+                                    account.name,
+                                    state_store,
+                                    notifier,
+                                    error,
+                                    config.watch.alert_cooldown_seconds,
+                                )
                 console.print(f"tick={tick} accounts={len(accounts_to_watch)} new_rollcalls={total_new}")
                 if ticks is not None and tick >= ticks:
                     return

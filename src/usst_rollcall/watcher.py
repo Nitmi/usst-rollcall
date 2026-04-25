@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import datetime, time as datetime_time
 
 from .client import TronClassClient, TronClassError
 from .models import NotificationMessage, Rollcall
 from .notify import Notifier
 from .state import StateStore
+
+
+def parse_clock(value: str) -> datetime_time:
+    return datetime.strptime(value, "%H:%M").time()
+
+
+def is_within_active_window(now: datetime, start: datetime_time, end: datetime_time) -> bool:
+    current = now.time()
+    if start <= end:
+        return start <= current <= end
+    return current >= start or current <= end
 
 
 def build_rollcall_message(account_name: str, rollcall: Rollcall) -> NotificationMessage:
@@ -80,12 +92,23 @@ def watch(
     *,
     interval_seconds: float,
     alert_cooldown_seconds: float,
+    active_start: str,
+    active_end: str,
     stop_after: int | None = None,
     on_tick: Callable[[int, int], None] | None = None,
 ) -> None:
     tick = 0
+    start_time = parse_clock(active_start)
+    end_time = parse_clock(active_end)
     while True:
         tick += 1
+        if not is_within_active_window(datetime.now().astimezone(), start_time, end_time):
+            if on_tick:
+                on_tick(tick, 0)
+            if stop_after is not None and tick >= stop_after:
+                return
+            time.sleep(interval_seconds)
+            continue
         try:
             new_rollcalls = poll_once(account_id, account_name, client, state, notifier)
         except TronClassError as error:
