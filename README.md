@@ -42,6 +42,7 @@ pip install usst-rollcall
 
 ```bash
 usst-rollcall --help
+usst-rollcall version
 ```
 
 ## 第一次使用
@@ -214,6 +215,8 @@ usst-rollcall watch --all
 | 命令 | 作用 |
 | --- | --- |
 | `usst-rollcall where` | 查看配置文件位置 |
+| `usst-rollcall version` | 查看当前安装版本 |
+| `usst-rollcall --version` | 查看当前安装版本 |
 | `usst-rollcall accounts` | 查看账号列表 |
 | `usst-rollcall session-set` | 保存登录凭据 |
 | `usst-rollcall session-show` | 查看当前登录凭据状态 |

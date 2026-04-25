@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as metadata_version
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import __version__
 from .client import TronClassClient, TronClassError
 from .config import AccountConfig, AppConfig, default_config_path, load_config, resolve_data_path, write_default_config
 from .models import NotificationMessage, SignResult
@@ -20,6 +22,19 @@ from .watcher import build_sign_message, is_within_active_window, notify_error_o
 
 app = typer.Typer(help="USST TronClass rollcall watcher.")
 console = Console()
+
+
+def package_version() -> str:
+    try:
+        return metadata_version("usst-rollcall")
+    except PackageNotFoundError:
+        return __version__
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        console.print(f"usst-rollcall {package_version()}")
+        raise typer.Exit()
 
 
 def _load_runtime(config_path: Path | None) -> tuple[AppConfig, Path, StateStore]:
@@ -52,6 +67,11 @@ def init_config(
 @app.command("where")
 def where() -> None:
     console.print(default_config_path())
+
+
+@app.command("version")
+def version_command() -> None:
+    console.print(f"usst-rollcall {package_version()}")
 
 
 @app.command("accounts")
@@ -264,6 +284,16 @@ def notify_test(
         )
     )
     console.print(f"Sent via: {', '.join(sent) if sent else '<none>'}")
+
+
+@app.callback()
+def app_callback(
+    _version: Annotated[
+        bool | None,
+        typer.Option("--version", callback=version_callback, help="Show version and exit."),
+    ] = None,
+) -> None:
+    return None
 
 
 def main() -> None:
