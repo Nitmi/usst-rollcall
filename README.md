@@ -243,6 +243,14 @@ uv tool upgrade usst-rollcall
 pip install -U usst-rollcall
 ```
 
+## 联系方式
+
+有问题或建议可以联系：
+
+```text
+a.oxidizing172@aleeas.com
+```
+
 ## 常见问题
 
 ### supervisor 里找不到 `usst-rollcall`
