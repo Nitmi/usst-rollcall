@@ -28,11 +28,3 @@ class SessionStore:
             tokens.cookies.update(cookies)
         self.save(tokens)
         return tokens
-
-
-def redact(value: str | None, keep: int = 8) -> str:
-    if not value:
-        return "<empty>"
-    if len(value) <= keep * 2:
-        return "<redacted>"
-    return f"{value[:keep]}...{value[-keep:]}"

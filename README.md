@@ -8,6 +8,7 @@
 
 - 检查课程签到
 - 有签到时推送通知
+- 自动登录
 - 支持 Bark、Gotify、邮件、控制台通知
 - 支持多个账号
 - 支持数字签到自动提交
@@ -35,8 +36,6 @@ uv tool upgrade usst-rollcall
 ```bash
 pip install usst-rollcall
 ```
-
-如果使用 `pip`，建议放在虚拟环境里，避免影响系统 Python。
 
 安装后检查命令是否可用：
 
@@ -66,27 +65,27 @@ usst-rollcall where
 | Windows | `%LOCALAPPDATA%\usst-rollcall\config.yaml` |
 | Linux / VPS | `~/.config/usst-rollcall/config.yaml` |
 
-### 2. 填入登录凭据
+### 2. 填入账号密码
 
-你需要从已登录的一网畅学请求里获取 `X-SESSION-ID`。
+在配置文件中填写账号密码登录信息：
 
-保存到工具里：
-
-```bash
-usst-rollcall session-set --x-session-id "这里填你的 X-SESSION-ID"
+```yaml
+login:
+  enabled: true
+  login_url: https://1906.usst.edu.cn/login?next=/user/index
+  form_id: casLoginForm
+  username: 你的学号或账号
+  password: 你的密码
 ```
 
-如果你也拿到了 `session` cookie，可以一起保存：
+可以先主动测试一次登录：
 
 ```bash
-usst-rollcall session-set --x-session-id "这里填你的 X-SESSION-ID" --session-cookie "这里填 session cookie"
+usst-rollcall login
+usst-rollcall login-status
 ```
 
-查看是否保存成功：
-
-```bash
-usst-rollcall session-show
-```
+程序会自动维护内部 session 缓存，你不需要手动处理。
 
 ### 3. 测试能否查询签到
 
@@ -117,6 +116,11 @@ usst-rollcall notify-test
 ```
 
 如果手机能收到消息，通知配置成功。
+
+## 自动登录说明
+
+如果 `watch` 或 `poll-once` 遇到 `401`，工具会自动尝试重新登录，再继续请求。
+如果本地还没有 session 缓存，程序也会先自动登录，再开始查询。
 
 ## 开启自动监控
 
@@ -190,18 +194,19 @@ accounts:
     name: 我的账号
     enabled: true
     session_file: sessions/main.json
+    login:
+      enabled: true
+      username: "2023000001"
+      password: "你的密码1"
 
   - id: friend
     name: 朋友账号
     enabled: true
     session_file: sessions/friend.json
-```
-
-给不同账号保存登录凭据：
-
-```bash
-usst-rollcall session-set --account main --x-session-id "main 的 X-SESSION-ID"
-usst-rollcall session-set --account friend --x-session-id "friend 的 X-SESSION-ID"
+    login:
+      enabled: true
+      username: "2023000002"
+      password: "你的密码2"
 ```
 
 运行所有账号：
@@ -212,6 +217,8 @@ usst-rollcall watch --all
 
 每个账号可以单独配置通知和自动签到。
 
+每个账号都可以配置自己的登录方式、通知方式和自动签到策略。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -220,8 +227,8 @@ usst-rollcall watch --all
 | `usst-rollcall version` | 查看当前安装版本 |
 | `usst-rollcall --version` | 查看当前安装版本 |
 | `usst-rollcall accounts` | 查看账号列表 |
-| `usst-rollcall session-set` | 保存登录凭据 |
-| `usst-rollcall session-show` | 查看当前登录凭据状态 |
+| `usst-rollcall login` | 使用配置中的账号密码重新登录并刷新 session |
+| `usst-rollcall login-status` | 查看当前账号是否已配置自动登录、是否已有缓存 session |
 | `usst-rollcall poll-once` | 立即检查一次签到 |
 | `usst-rollcall poll-once --notify` | 检查一次，有新签到就通知 |
 | `usst-rollcall watch --all` | 持续监控所有启用账号 |
@@ -265,11 +272,16 @@ a.oxidizing172@aleeas.com
 
 ### 提示 401 或查询失败
 
-通常是登录凭据过期了。重新获取 `X-SESSION-ID` 后再执行：
+通常是缓存 session 过期了，或者账号密码登录配置不完整。
+
+先执行：
 
 ```bash
-usst-rollcall session-set --x-session-id "新的 X-SESSION-ID"
+usst-rollcall login
+usst-rollcall login-status
 ```
+
+如果还是失败，再检查配置文件里的 `login.enabled`、`username` 和 `password`。
 
 ### 没收到通知
 

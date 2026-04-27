@@ -62,6 +62,16 @@ class TronClassClient:
         for name, value in self.tokens.cookies.items():
             self.client.cookies.set(name, value)
 
+    def reload_session(self) -> None:
+        self.tokens = self.session_store.load()
+        if self.tokens.x_session_id:
+            self.client.headers["X-SESSION-ID"] = self.tokens.x_session_id
+        else:
+            self.client.headers.pop("X-SESSION-ID", None)
+        self.client.cookies.clear()
+        for name, value in self.tokens.cookies.items():
+            self.client.cookies.set(name, value)
+
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         response = self.client.request(method, url, **kwargs)
         self._persist_response_session(response)
@@ -88,6 +98,9 @@ class TronClassClient:
             params={"api_version": self.http_config.api_version},
         )
         return RollcallResponse.model_validate(data)
+
+    def get_profile(self) -> Any:
+        return self._json_request("GET", "/api/profile")
 
     def rollcall_url(self, rollcall_id: str) -> str:
         return urljoin(self.http_config.base_url, f"/api/rollcall/{rollcall_id}")

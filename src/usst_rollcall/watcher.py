@@ -128,6 +128,7 @@ def watch(
     active_start: str,
     active_end: str,
     sign_config: SignConfig | None = None,
+    recover_session: Callable[[], bool] | None = None,
     stop_after: int | None = None,
     on_tick: Callable[[int, int], None] | None = None,
 ) -> None:
@@ -146,8 +147,15 @@ def watch(
         try:
             new_rollcalls = poll_once(account_id, account_name, client, state, notifier, sign_config)
         except TronClassError as error:
-            notify_error_once(account_id, account_name, state, notifier, error, alert_cooldown_seconds)
-            new_rollcalls = []
+            if error.status_code == 401 and recover_session and recover_session():
+                try:
+                    new_rollcalls = poll_once(account_id, account_name, client, state, notifier, sign_config)
+                except TronClassError as retry_error:
+                    notify_error_once(account_id, account_name, state, notifier, retry_error, alert_cooldown_seconds)
+                    new_rollcalls = []
+            else:
+                notify_error_once(account_id, account_name, state, notifier, error, alert_cooldown_seconds)
+                new_rollcalls = []
         if on_tick:
             on_tick(tick, len(new_rollcalls))
         if stop_after is not None and tick >= stop_after:

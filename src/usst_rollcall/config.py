@@ -48,6 +48,30 @@ class WatchConfig(BaseModel):
     active_end: str = "20:30"
 
 
+class LoginConfig(BaseModel):
+    enabled: bool = False
+    login_url: str = "https://1906.usst.edu.cn/login?next=/user/index"
+    form_id: str = "casLoginForm"
+    username: str = ""
+    password: str = ""
+    password_env: str | None = None
+    captcha: str = ""
+    user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0.0.0 Safari/537.36"
+    )
+    username_field: str = "username"
+    password_field: str = "password"
+    captcha_field: str = "captchaResponse"
+    success_probe: str = "/api/profile"
+
+    def resolved_password(self) -> str:
+        if self.password_env:
+            return os.environ.get(self.password_env, "")
+        return self.password
+
+
 class RadarLocationConfig(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
@@ -109,12 +133,14 @@ class AccountConfig(BaseModel):
     name: str = "Main"
     enabled: bool = True
     session_file: str = "sessions/main.json"
+    login: dict[str, Any] | None = None
     notify: dict[str, Any] | None = None
     sign: dict[str, Any] | None = None
 
 
 class AppConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
+    login: LoginConfig = Field(default_factory=LoginConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     sign: SignConfig = Field(default_factory=SignConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
@@ -142,6 +168,12 @@ class AppConfig(BaseModel):
         if account.sign:
             data = deep_merge(data, deepcopy(account.sign))
         return SignConfig.model_validate(data)
+
+    def login_for_account(self, account: AccountConfig) -> LoginConfig:
+        data = self.login.model_dump(mode="json")
+        if account.login:
+            data = deep_merge(data, deepcopy(account.login))
+        return LoginConfig.model_validate(data)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

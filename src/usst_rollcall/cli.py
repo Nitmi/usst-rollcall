@@ -11,10 +11,11 @@ from rich.table import Table
 
 from . import __version__
 from .client import TronClassClient, TronClassError
-from .config import AccountConfig, AppConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
-from .models import NotificationMessage, SignResult
+from .config import AccountConfig, AppConfig, LoginConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
+from .login import LoginError, login as login_with_form
+from .models import LoginResult, NotificationMessage, SignResult
 from .notify import Notifier
-from .session import SessionStore, redact
+from .session import SessionStore
 from .signer import attempt_sign
 from .state import StateStore
 from .watcher import build_sign_message, is_within_active_window, notify_error_once, parse_clock, poll_once, watch
@@ -62,6 +63,10 @@ def _sign_config_for_account(config: AppConfig, account: AccountConfig, override
     return sign_config.model_copy(update={"enabled": override})
 
 
+def _login_config_for_account(config: AppConfig, account: AccountConfig) -> LoginConfig:
+    return config.login_for_account(account)
+
+
 def _sign_override_label(value: bool | None) -> str:
     if value is True:
         return "enabled by --sign"
@@ -99,6 +104,94 @@ def _print_watch_start(
     console.print(table)
 
 
+def _run_login(
+    config: AppConfig,
+    account: AccountConfig,
+    session_store: SessionStore,
+    *,
+    force: bool = False,
+) -> LoginResult:
+    login_config = _login_config_for_account(config, account)
+    if force:
+        login_config = login_config.model_copy(update={"enabled": True})
+    try:
+        result = login_with_form(config.http, login_config, session_store)
+    except LoginError as exc:
+        return LoginResult(success=False, message=str(exc))
+    return result
+
+
+def _try_relogin(
+    config: AppConfig,
+    account: AccountConfig,
+    session_store: SessionStore,
+) -> bool:
+    result = _run_login(config, account, session_store)
+    if result.success:
+        profile = result.profile_name or result.profile_id or "unknown"
+        console.print(f"[{account.id}] auto login succeeded: {profile}")
+        return True
+    console.print(f"[yellow][{account.id}] auto login failed: {result.message}[/yellow]")
+    return False
+
+
+def _ensure_account_session(
+    config: AppConfig,
+    account: AccountConfig,
+    session_store: SessionStore,
+) -> None:
+    if not session_store.load().is_empty():
+        return
+    login_config = _login_config_for_account(config, account)
+    if not login_config.enabled:
+        console.print(
+            f"[red][{account.id}] no cached session and login.enabled is false. "
+            "Configure account password login first.[/red]"
+        )
+        raise typer.Exit(1)
+    console.print(f"[{account.id}] no cached session, signing in with account password...")
+    if not _try_relogin(config, account, session_store):
+        raise typer.Exit(1)
+
+
+def _process_rollcalls(
+    account: AccountConfig,
+    response_rollcalls: list,
+    *,
+    state_store: StateStore,
+    notifier: Notifier | None,
+    notify: bool,
+    sign_config: SignConfig,
+    client: TronClassClient,
+) -> None:
+    console.print(f"[{account.id}] Rollcalls: {len(response_rollcalls)}")
+    for rollcall in response_rollcalls:
+        is_new = state_store.upsert_seen(account.id, rollcall)
+        if notify and is_new and notifier:
+            body = f"Account: {account.name}\n{rollcall.model_dump_json(indent=2)}"
+            notifier.send(NotificationMessage(title="USST rollcall detected", body=body))
+            state_store.mark_notified(account.id, rollcall.key)
+        if sign_config.enabled and not state_store.has_sign_result(account.id, rollcall.key):
+            try:
+                result = attempt_sign(client, rollcall, sign_config)
+            except TronClassError as error:
+                result = SignResult(
+                    attempted=True,
+                    success=False,
+                    method=rollcall.type_label,
+                    message=str(error),
+                    rollcall_id=rollcall.key,
+                )
+            state_store.mark_sign_result(account.id, rollcall.key, result)
+            if notify and notifier and sign_config.notify_result:
+                notifier.send(build_sign_message(account.name, rollcall, result))
+            console.print(f"  sign={result.method}:{result.message}")
+        console.print(
+            f"- [{account.id}] {rollcall.key} {rollcall.display_title} "
+            f"[{rollcall.type_label}] status={rollcall.status}"
+        )
+
+
 @app.command("init-config")
 def init_config(
     path: Annotated[Path | None, typer.Option(help="Config file path.")] = None,
@@ -121,51 +214,60 @@ def version_command() -> None:
 @app.command("accounts")
 def accounts(config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None) -> None:
     config, resolved_config_path = load_config(config_path)
-    table = Table("ID", "Name", "Enabled", "Session File", "Notify Override")
+    table = Table("ID", "Name", "Enabled", "Session File", "Auto Login", "Notify Override")
     for account in config.accounts:
+        login_config = _login_config_for_account(config, account)
         table.add_row(
             account.id,
             account.name,
             str(account.enabled),
             str(resolve_data_path(resolved_config_path, account.session_file)),
+            "enabled" if login_config.enabled else "disabled",
             "yes" if account.notify else "no",
         )
     console.print(table)
 
 
-@app.command("session-set")
-def session_set(
-    x_session_id: Annotated[str, typer.Option(prompt=True, hide_input=True)],
-    session_cookie: Annotated[str | None, typer.Option(help="Optional session cookie value.")] = None,
+@app.command("login-status")
+def login_status(
     account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
     config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
 ) -> None:
     config, resolved_config_path = load_config(config_path)
     account = _select_account(config, account_id)
-    store = _session_store(resolved_config_path, account)
-    cookies = {"session": session_cookie} if session_cookie else None
-    store.update(x_session_id=x_session_id, cookies=cookies)
-    console.print(f"Session saved for account: {account.id}")
-
-
-@app.command("session-show")
-def session_show(
-    account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
-    config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
-) -> None:
-    config, resolved_config_path = load_config(config_path)
-    account = _select_account(config, account_id)
+    login_config = _login_config_for_account(config, account)
     store = _session_store(resolved_config_path, account)
     tokens = store.load()
     table = Table("Field", "Value")
     table.add_row("config", str(resolved_config_path))
     table.add_row("account_id", account.id)
     table.add_row("account_name", account.name)
-    table.add_row("session_file", str(store.path))
-    table.add_row("x_session_id", redact(tokens.x_session_id))
-    table.add_row("cookies", ", ".join(tokens.cookies.keys()) or "<empty>")
-    table.add_row("updated_at", str(tokens.updated_at or "<never>"))
+    table.add_row("login_enabled", str(login_config.enabled))
+    table.add_row("username", login_config.username or "<empty>")
+    table.add_row(
+        "password_source",
+        f"env:{login_config.password_env}" if login_config.password_env else ("inline" if login_config.password else "<empty>"),
+    )
+    table.add_row("session_cache", str(store.path))
+    table.add_row("cached_session", "yes" if not tokens.is_empty() else "no")
+    table.add_row("cache_updated_at", str(tokens.updated_at or "<never>"))
     console.print(table)
+
+
+@app.command("login")
+def login_command(
+    account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
+    config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+) -> None:
+    config, resolved_config_path = load_config(config_path)
+    account = _select_account(config, account_id)
+    session_store = _session_store(resolved_config_path, account)
+    result = _run_login(config, account, session_store, force=True)
+    if not result.success:
+        console.print(f"[red]Login failed for account {account.id}: {result.message}[/red]")
+        raise typer.Exit(1)
+    profile = result.profile_name or result.profile_id or "<unknown>"
+    console.print(f"Login succeeded for account {account.id}: {profile}")
 
 
 @app.command("poll-once")
@@ -184,33 +286,32 @@ def poll_once_command(
                 notifier = Notifier(config.notify_for_account(account)) if notify else None
                 sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
-                with TronClassClient(config.http, session_store) as client:
-                    response = client.get_rollcalls()
-                    console.print(f"[{account.id}] Rollcalls: {len(response.rollcalls)}")
-                    for rollcall in response.rollcalls:
-                        is_new = state_store.upsert_seen(account.id, rollcall)
-                        if notify and is_new and notifier:
-                            body = f"Account: {account.name}\n{rollcall.model_dump_json(indent=2)}"
-                            notifier.send(NotificationMessage(title="USST rollcall detected", body=body))
-                            state_store.mark_notified(account.id, rollcall.key)
-                        if sign_config.enabled and not state_store.has_sign_result(account.id, rollcall.key):
-                            try:
-                                result = attempt_sign(client, rollcall, sign_config)
-                            except TronClassError as error:
-                                result = SignResult(
-                                    attempted=True,
-                                    success=False,
-                                    method=rollcall.type_label,
-                                    message=str(error),
-                                    rollcall_id=rollcall.key,
-                                )
-                            state_store.mark_sign_result(account.id, rollcall.key, result)
-                            if notify and notifier and sign_config.notify_result:
-                                notifier.send(build_sign_message(account.name, rollcall, result))
-                            console.print(f"  sign={result.method}:{result.message}")
-                        console.print(
-                            f"- [{account.id}] {rollcall.key} {rollcall.display_title} "
-                            f"[{rollcall.type_label}] status={rollcall.status}"
+                _ensure_account_session(config, account, session_store)
+                try:
+                    with TronClassClient(config.http, session_store) as client:
+                        response = client.get_rollcalls()
+                        _process_rollcalls(
+                            account,
+                            response.rollcalls,
+                            state_store=state_store,
+                            notifier=notifier,
+                            notify=notify,
+                            sign_config=sign_config,
+                            client=client,
+                        )
+                except TronClassError as exc:
+                    if exc.status_code != 401 or not _try_relogin(config, account, session_store):
+                        raise
+                    with TronClassClient(config.http, session_store) as client:
+                        response = client.get_rollcalls()
+                        _process_rollcalls(
+                            account,
+                            response.rollcalls,
+                            state_store=state_store,
+                            notifier=notifier,
+                            notify=notify,
+                            sign_config=sign_config,
+                            client=client,
                         )
     except TronClassError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -248,7 +349,14 @@ def watch_command(
                 notifier = Notifier(config.notify_for_account(account))
                 sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
+                _ensure_account_session(config, account, session_store)
                 with TronClassClient(config.http, session_store) as client:
+                    def recover_session() -> bool:
+                        if not _try_relogin(config, account, session_store):
+                            return False
+                        client.reload_session()
+                        return True
+
                     watch(
                         account.id,
                         account.name,
@@ -260,6 +368,7 @@ def watch_command(
                         active_start=config.watch.active_start,
                         active_end=config.watch.active_end,
                         sign_config=sign_config,
+                        recover_session=recover_session,
                         stop_after=ticks,
                         on_tick=on_tick,
                     )
@@ -276,6 +385,7 @@ def watch_command(
                         notifier = Notifier(config.notify_for_account(account))
                         sign_config = _sign_config_for_account(config, account, sign)
                         session_store = _session_store(resolved_config_path, account)
+                        _ensure_account_session(config, account, session_store)
                         with TronClassClient(config.http, session_store) as client:
                             try:
                                 total_new += len(
@@ -289,14 +399,37 @@ def watch_command(
                                     )
                                 )
                             except TronClassError as error:
-                                notify_error_once(
-                                    account.id,
-                                    account.name,
-                                    state_store,
-                                    notifier,
-                                    error,
-                                    config.watch.alert_cooldown_seconds,
-                                )
+                                if error.status_code == 401 and _try_relogin(config, account, session_store):
+                                    with TronClassClient(config.http, session_store) as retry_client:
+                                        try:
+                                            total_new += len(
+                                                poll_once(
+                                                    account.id,
+                                                    account.name,
+                                                    retry_client,
+                                                    state_store,
+                                                    notifier,
+                                                    sign_config,
+                                                )
+                                            )
+                                        except TronClassError as retry_error:
+                                            notify_error_once(
+                                                account.id,
+                                                account.name,
+                                                state_store,
+                                                notifier,
+                                                retry_error,
+                                                config.watch.alert_cooldown_seconds,
+                                            )
+                                else:
+                                    notify_error_once(
+                                        account.id,
+                                        account.name,
+                                        state_store,
+                                        notifier,
+                                        error,
+                                        config.watch.alert_cooldown_seconds,
+                                    )
                 console.print(f"tick={tick} accounts={len(accounts_to_watch)} new_rollcalls={total_new}")
                 if ticks is not None and tick >= ticks:
                     return

@@ -75,3 +75,11 @@ class SignResult(BaseModel):
     message: str
     rollcall_id: str | None = None
     raw: Any | None = None
+
+
+class LoginResult(BaseModel):
+    success: bool
+    message: str
+    final_url: str | None = None
+    profile_id: str | None = None
+    profile_name: str | None = None
