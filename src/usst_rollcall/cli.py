@@ -11,7 +11,7 @@ from rich.table import Table
 
 from . import __version__
 from .client import TronClassClient, TronClassError
-from .config import AccountConfig, AppConfig, LoginConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
+from .config import AccountConfig, AppConfig, LoginConfig, NotifyConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
 from .login import LoginError, login as login_with_form
 from .models import LoginResult, NotificationMessage, SignResult
 from .notify import Notifier
@@ -57,14 +57,18 @@ def _select_account(config: AppConfig, account_id: str) -> AccountConfig:
 
 
 def _sign_config_for_account(config: AppConfig, account: AccountConfig, override: bool | None) -> SignConfig:
-    sign_config = config.sign_for_account(account)
+    sign_config = account.sign
     if override is None:
         return sign_config
     return sign_config.model_copy(update={"enabled": override})
 
 
 def _login_config_for_account(config: AppConfig, account: AccountConfig) -> LoginConfig:
-    return config.login_for_account(account)
+    return account.login
+
+
+def _notify_config_for_account(config: AppConfig, account: AccountConfig) -> NotifyConfig:
+    return account.notify
 
 
 def _sign_override_label(value: bool | None) -> str:
@@ -73,6 +77,19 @@ def _sign_override_label(value: bool | None) -> str:
     if value is False:
         return "disabled by --no-sign"
     return "from config"
+
+
+def _notify_channels_label(notify_config: NotifyConfig) -> str:
+    channels: list[str] = []
+    if notify_config.console.enabled:
+        channels.append("console")
+    if notify_config.bark.enabled:
+        channels.append("bark")
+    if notify_config.gotify.enabled:
+        channels.append("gotify")
+    if notify_config.email.enabled:
+        channels.append("email")
+    return ", ".join(channels) if channels else "none"
 
 
 def _print_watch_start(
@@ -92,14 +109,17 @@ def _print_watch_start(
     console.print(f"Active window: {config.watch.active_start}-{config.watch.active_end}")
     console.print(f"Interval: {interval_seconds:g}s")
 
-    table = Table("Account", "Name", "Auto Sign", "Notify Override")
+    table = Table("Account", "Name", "Auto Login", "Auto Sign", "Notify")
     for account in accounts:
         sign_config = _sign_config_for_account(config, account, sign_override)
+        login_config = _login_config_for_account(config, account)
+        notify_config = _notify_config_for_account(config, account)
         table.add_row(
             account.id,
             account.name,
+            "enabled" if login_config.enabled else "disabled",
             "enabled" if sign_config.enabled else "disabled",
-            "yes" if account.notify else "no",
+            _notify_channels_label(notify_config),
         )
     console.print(table)
 
@@ -214,16 +234,19 @@ def version_command() -> None:
 @app.command("accounts")
 def accounts(config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None) -> None:
     config, resolved_config_path = load_config(config_path)
-    table = Table("ID", "Name", "Enabled", "Session File", "Auto Login", "Notify Override")
+    table = Table("ID", "Name", "Enabled", "Session File", "Auto Login", "Auto Sign", "Notify")
     for account in config.accounts:
         login_config = _login_config_for_account(config, account)
+        sign_config = _sign_config_for_account(config, account, None)
+        notify_config = _notify_config_for_account(config, account)
         table.add_row(
             account.id,
             account.name,
             str(account.enabled),
             str(resolve_data_path(resolved_config_path, account.session_file)),
             "enabled" if login_config.enabled else "disabled",
-            "yes" if account.notify else "no",
+            "enabled" if sign_config.enabled else "disabled",
+            _notify_channels_label(notify_config),
         )
     console.print(table)
 
@@ -283,7 +306,7 @@ def poll_once_command(
     try:
         with state_store:
             for account in accounts_to_poll:
-                notifier = Notifier(config.notify_for_account(account)) if notify else None
+                notifier = Notifier(_notify_config_for_account(config, account)) if notify else None
                 sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
                 _ensure_account_session(config, account, session_store)
@@ -346,7 +369,7 @@ def watch_command(
         with state_store:
             if len(accounts_to_watch) == 1:
                 account = accounts_to_watch[0]
-                notifier = Notifier(config.notify_for_account(account))
+                notifier = Notifier(_notify_config_for_account(config, account))
                 sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
                 _ensure_account_session(config, account, session_store)
@@ -382,7 +405,7 @@ def watch_command(
                 total_new = 0
                 if is_within_active_window(datetime.now().astimezone(), active_start, active_end):
                     for account in accounts_to_watch:
-                        notifier = Notifier(config.notify_for_account(account))
+                        notifier = Notifier(_notify_config_for_account(config, account))
                         sign_config = _sign_config_for_account(config, account, sign)
                         session_store = _session_store(resolved_config_path, account)
                         _ensure_account_session(config, account, session_store)
@@ -446,23 +469,20 @@ def watch_command(
 @app.command("notify-test")
 def notify_test(
     config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
-    account_id: Annotated[str | None, typer.Option("--account", "-a", help="Test account-specific notification.")] = None,
+    account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
+    all_accounts: Annotated[bool, typer.Option("--all", help="Send test notifications to all enabled accounts.")] = False,
 ) -> None:
     config, _resolved_config_path = load_config(config_path)
-    if account_id:
-        account = _select_account(config, account_id)
-        notify_config = config.notify_for_account(account)
-        body = f"Notification channel is working for account: {account.name}."
-    else:
-        notify_config = config.notify
-        body = "Notification channel is working."
-    sent = Notifier(notify_config).send(
-        NotificationMessage(
-            title="USST rollcall test",
-            body=body,
+    accounts_to_notify = config.enabled_accounts() if all_accounts else [_select_account(config, account_id)]
+    for account in accounts_to_notify:
+        notify_config = _notify_config_for_account(config, account)
+        sent = Notifier(notify_config).send(
+            NotificationMessage(
+                title="USST rollcall test",
+                body=f"Notification channel is working for account: {account.name}.",
+            )
         )
-    )
-    console.print(f"Sent via: {', '.join(sent) if sent else '<none>'}")
+        console.print(f"[{account.id}] Sent via: {', '.join(sent) if sent else '<none>'}")
 
 
 @app.callback()

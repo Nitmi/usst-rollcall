@@ -70,12 +70,15 @@ usst-rollcall where
 在配置文件中填写账号密码登录信息：
 
 ```yaml
-login:
-  enabled: true
-  login_url: https://1906.usst.edu.cn/login?next=/user/index
-  form_id: casLoginForm
-  username: 你的学号或账号
-  password: 你的密码
+accounts:
+  - id: main
+    name: Main
+    enabled: true
+    session_file: sessions/main.json
+    login:
+      enabled: true
+      username: 你的学号或账号
+      password: 你的密码
 ```
 
 可以先主动测试一次登录：
@@ -97,16 +100,18 @@ usst-rollcall poll-once
 
 ## 配置通知
 
-打开配置文件，找到 `notify`。
+打开配置文件，找到对应账号下面的 `notify`。
 
 ### Bark 示例
 
 ```yaml
-notify:
-  bark:
-    enabled: true
-    server: https://api.day.app
-    key: 你的 Bark key
+accounts:
+  - id: main
+    notify:
+      bark:
+        enabled: true
+        server: https://api.day.app
+        key: 你的 Bark key
 ```
 
 测试通知：
@@ -144,14 +149,16 @@ usst-rollcall watch
 
 ## 开启自动签到
 
-自动签到默认关闭。需要你手动打开配置文件，把 `sign.enabled` 改为 `true`：
+自动签到默认关闭。需要你手动打开配置文件，把对应账号的 `sign.enabled` 改为 `true`：
 
 ```yaml
-sign:
-  enabled: true
-  number_enabled: true
-  radar_enabled: false
-  notify_result: true
+accounts:
+  - id: main
+    sign:
+      enabled: true
+      number_enabled: true
+      radar_enabled: false
+      notify_result: true
 ```
 
 临时开启一次：
@@ -175,13 +182,15 @@ usst-rollcall watch --all --sign
 雷达签到配置示例：
 
 ```yaml
-sign:
-  enabled: true
-  radar_enabled: true
-  radar_location:
-    latitude: 31.000000
-    longitude: 121.000000
-    accuracy: 35.0
+accounts:
+  - id: main
+    sign:
+      enabled: true
+      radar_enabled: true
+      radar_location:
+        latitude: 31.000000
+        longitude: 121.000000
+        accuracy: 35.0
 ```
 
 ## 多账号
@@ -217,7 +226,7 @@ usst-rollcall watch --all
 
 每个账号可以单独配置通知和自动签到。
 
-每个账号都可以配置自己的登录方式、通知方式和自动签到策略。
+每个账号都配置自己的登录方式、通知方式和自动签到策略。
 
 ## 常用命令
 
@@ -281,7 +290,7 @@ usst-rollcall login
 usst-rollcall login-status
 ```
 
-如果还是失败，再检查配置文件里的 `login.enabled`、`username` 和 `password`。
+如果还是失败，再检查对应账号下面的 `login.enabled`、`username` 和 `password`。
 
 ### 没收到通知
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,6 @@ class HttpConfig(BaseModel):
 
 class WatchConfig(BaseModel):
     interval_seconds: float = 10.0
-    notify_when_empty: bool = False
     alert_cooldown_seconds: float = 1800.0
     active_start: str = "07:30"
     active_end: str = "20:30"
@@ -133,17 +133,14 @@ class AccountConfig(BaseModel):
     name: str = "Main"
     enabled: bool = True
     session_file: str = "sessions/main.json"
-    login: dict[str, Any] | None = None
-    notify: dict[str, Any] | None = None
-    sign: dict[str, Any] | None = None
+    login: LoginConfig = Field(default_factory=LoginConfig)
+    notify: NotifyConfig = Field(default_factory=NotifyConfig)
+    sign: SignConfig = Field(default_factory=SignConfig)
 
 
 class AppConfig(BaseModel):
     http: HttpConfig = Field(default_factory=HttpConfig)
-    login: LoginConfig = Field(default_factory=LoginConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
-    sign: SignConfig = Field(default_factory=SignConfig)
-    notify: NotifyConfig = Field(default_factory=NotifyConfig)
     accounts: list[AccountConfig] = Field(default_factory=lambda: [AccountConfig()])
 
     state_file: str = "state.sqlite3"
@@ -157,24 +154,6 @@ class AppConfig(BaseModel):
     def enabled_accounts(self) -> list[AccountConfig]:
         return [account for account in self.accounts if account.enabled]
 
-    def notify_for_account(self, account: AccountConfig) -> NotifyConfig:
-        data = self.notify.model_dump(mode="json")
-        if account.notify:
-            data = deep_merge(data, deepcopy(account.notify))
-        return NotifyConfig.model_validate(data)
-
-    def sign_for_account(self, account: AccountConfig) -> SignConfig:
-        data = self.sign.model_dump(mode="json")
-        if account.sign:
-            data = deep_merge(data, deepcopy(account.sign))
-        return SignConfig.model_validate(data)
-
-    def login_for_account(self, account: AccountConfig) -> LoginConfig:
-        data = self.login.model_dump(mode="json")
-        if account.login:
-            data = deep_merge(data, deepcopy(account.login))
-        return LoginConfig.model_validate(data)
-
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     for key, value in override.items():
@@ -185,11 +164,44 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return base
 
 
+def _merge_account_section(default_section: Any, account_section: Any) -> dict[str, Any]:
+    base = deepcopy(default_section) if isinstance(default_section, dict) else {}
+    if isinstance(account_section, dict):
+        return deep_merge(base, deepcopy(account_section))
+    return base
+
+
+def _normalize_config_data(raw_data: Any) -> dict[str, Any]:
+    data = deepcopy(raw_data) if isinstance(raw_data, dict) else {}
+    default_login = data.pop("login", None)
+    default_notify = data.pop("notify", None)
+    default_sign = data.pop("sign", None)
+
+    raw_accounts = data.get("accounts")
+    accounts = raw_accounts if isinstance(raw_accounts, list) and raw_accounts else [{}]
+    normalized_accounts: list[dict[str, Any]] = []
+    for raw_account in accounts:
+        account = deepcopy(raw_account) if isinstance(raw_account, dict) else {}
+        account["login"] = _merge_account_section(default_login, account.get("login"))
+        account["notify"] = _merge_account_section(default_notify, account.get("notify"))
+        account["sign"] = _merge_account_section(default_sign, account.get("sign"))
+        normalized_accounts.append(account)
+    data["accounts"] = normalized_accounts
+    return data
+
+
+def _default_config_template() -> str:
+    repo_template = Path(__file__).resolve().parents[2] / "examples" / "config.yaml"
+    if repo_template.exists():
+        return repo_template.read_text(encoding="utf-8")
+    return resources.files("usst_rollcall").joinpath("default_config.yaml").read_text(encoding="utf-8")
+
+
 def load_config(path: Path | None = None) -> tuple[AppConfig, Path]:
     config_path = path or default_config_path()
     if not config_path.exists():
         return AppConfig(), config_path
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    data = _normalize_config_data(yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
     return AppConfig.model_validate(data), config_path
 
 
@@ -198,11 +210,7 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
     if config_path.exists() and not force:
         raise FileExistsError(f"Config already exists: {config_path}")
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config = AppConfig()
-    config_path.write_text(
-        yaml.safe_dump(config.model_dump(mode="json"), allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
+    config_path.write_text(_default_config_template(), encoding="utf-8")
     return config_path
 
 

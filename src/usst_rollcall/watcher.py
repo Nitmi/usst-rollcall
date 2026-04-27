@@ -38,7 +38,11 @@ def build_rollcall_message(account_name: str, rollcall: Rollcall) -> Notificatio
 
 def build_error_message(account_name: str, error: TronClassError) -> NotificationMessage:
     status = error.status_code or "unknown"
-    hint = "Refresh X-SESSION-ID/session cookie and run session-set." if error.status_code == 401 else "Check network, session, and API availability."
+    hint = (
+        "Run usst-rollcall login and check the account password configuration."
+        if error.status_code == 401
+        else "Check network, session, and API availability."
+    )
     body = "\n".join(
         [
             f"Account: {account_name}",
