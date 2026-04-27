@@ -1,6 +1,6 @@
 [project]
 name = "usst-rollcall"
-version = "0.1.4"
+version = "0.1.5"
 description = "USST TronClass rollcall watcher and notifier"
 readme = "README.md"
 authors = [
@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-settings>=2.14.0",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
+    "tzdata>=2025.2",
     "typer>=0.24.2",
 ]
 classifiers = [

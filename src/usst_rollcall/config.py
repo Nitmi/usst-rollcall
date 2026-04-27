@@ -46,6 +46,7 @@ class WatchConfig(BaseModel):
     alert_cooldown_seconds: float = 1800.0
     active_start: str = "07:30"
     active_end: str = "20:30"
+    timezone: str = "Asia/Shanghai"
 
 
 class LoginConfig(BaseModel):

@@ -10,6 +10,7 @@ watch:
   alert_cooldown_seconds: 1800.0
   active_start: "07:30"
   active_end: "20:30"
+  timezone: Asia/Shanghai
 accounts:
   - id: main
     name: Main

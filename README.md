@@ -143,6 +143,15 @@ usst-rollcall watch
 
 默认情况下，程序只会在 `07:30-20:30` 之间请求签到接口。其他时间程序会保持运行，但不会检查签到。
 
+默认按 `Asia/Shanghai` 时区判断活跃时间。如果你的运行环境时区特殊，可以在配置文件里修改：
+
+```yaml
+watch:
+  active_start: "07:30"
+  active_end: "20:30"
+  timezone: Asia/Shanghai
+```
+
 启动后会先显示运行摘要，你可以看到当前是否启用了 `--all`、是否启用了 `--sign`、正在监控哪些账号。
 
 如果部署在 VPS，建议用 `supervisor`、`systemd`、Docker 或其他进程管理工具守护运行。

@@ -18,7 +18,7 @@ from .notify import Notifier
 from .session import SessionStore
 from .signer import attempt_sign
 from .state import StateStore
-from .watcher import build_sign_message, is_within_active_window, notify_error_once, parse_clock, poll_once, watch
+from .watcher import build_sign_message, is_within_active_window, notify_error_once, now_in_timezone, parse_clock, poll_once, watch
 
 
 app = typer.Typer(help="USST TronClass rollcall watcher.")
@@ -106,7 +106,7 @@ def _print_watch_start(
     console.print(f"Version: {package_version()}")
     console.print(f"Scope: {scope}")
     console.print(f"Auto sign: {_sign_override_label(sign_override)}")
-    console.print(f"Active window: {config.watch.active_start}-{config.watch.active_end}")
+    console.print(f"Active window: {config.watch.active_start}-{config.watch.active_end} ({config.watch.timezone})")
     console.print(f"Interval: {interval_seconds:g}s")
 
     table = Table("Account", "Name", "Auto Login", "Auto Sign", "Notify")
@@ -362,8 +362,11 @@ def watch_command(
         sign_override=sign,
     )
 
-    def on_tick(tick: int, new_count: int) -> None:
-        console.print(f"tick={tick} new_rollcalls={new_count}")
+    def on_tick(tick: int, new_count: int, active: bool) -> None:
+        if active:
+            console.print(f"tick={tick} new_rollcalls={new_count}")
+        else:
+            console.print(f"tick={tick} idle=outside-active-window")
 
     try:
         with state_store:
@@ -372,8 +375,10 @@ def watch_command(
                 notifier = Notifier(_notify_config_for_account(config, account))
                 sign_config = _sign_config_for_account(config, account, sign)
                 session_store = _session_store(resolved_config_path, account)
-                _ensure_account_session(config, account, session_store)
                 with TronClassClient(config.http, session_store) as client:
+                    def prepare_session() -> None:
+                        _ensure_account_session(config, account, session_store)
+
                     def recover_session() -> bool:
                         if not _try_relogin(config, account, session_store):
                             return False
@@ -390,7 +395,9 @@ def watch_command(
                         alert_cooldown_seconds=config.watch.alert_cooldown_seconds,
                         active_start=config.watch.active_start,
                         active_end=config.watch.active_end,
+                        timezone_name=config.watch.timezone,
                         sign_config=sign_config,
+                        prepare_session=prepare_session,
                         recover_session=recover_session,
                         stop_after=ticks,
                         on_tick=on_tick,
@@ -403,7 +410,8 @@ def watch_command(
             while True:
                 tick += 1
                 total_new = 0
-                if is_within_active_window(datetime.now().astimezone(), active_start, active_end):
+                active = is_within_active_window(now_in_timezone(config.watch.timezone), active_start, active_end)
+                if active:
                     for account in accounts_to_watch:
                         notifier = Notifier(_notify_config_for_account(config, account))
                         sign_config = _sign_config_for_account(config, account, sign)
@@ -453,7 +461,10 @@ def watch_command(
                                         error,
                                         config.watch.alert_cooldown_seconds,
                                     )
-                console.print(f"tick={tick} accounts={len(accounts_to_watch)} new_rollcalls={total_new}")
+                if active:
+                    console.print(f"tick={tick} accounts={len(accounts_to_watch)} new_rollcalls={total_new}")
+                else:
+                    console.print(f"tick={tick} accounts={len(accounts_to_watch)} idle=outside-active-window")
                 if ticks is not None and tick >= ticks:
                     return
                 import time
