@@ -6,7 +6,7 @@ http:
   timeout_seconds: 15.0
   user_agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148/HuaWei-AnyOffice/2.6.1802.0010/com.huawei.cloudlink.workplace
 watch:
-  interval_seconds: 10.0
+  interval_seconds: 60.0
   alert_cooldown_seconds: 1800.0
   active_start: "07:30"
   active_end: "20:30"
@@ -17,11 +17,11 @@ accounts:
     enabled: true
     session_file: sessions/main.json
     login:
-      enabled: false
+      enabled: true
       username: ""
       password: ""
     sign:
-      enabled: false
+      enabled: true
     notify:
       console:
         enabled: true

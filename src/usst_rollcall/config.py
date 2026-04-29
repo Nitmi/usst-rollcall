@@ -42,7 +42,7 @@ class HttpConfig(BaseModel):
 
 
 class WatchConfig(BaseModel):
-    interval_seconds: float = 10.0
+    interval_seconds: float = 60.0
     alert_cooldown_seconds: float = 1800.0
     active_start: str = "07:30"
     active_end: str = "20:30"
@@ -50,7 +50,7 @@ class WatchConfig(BaseModel):
 
 
 class LoginConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     login_url: str = "https://1906.usst.edu.cn/login?next=/user/index"
     form_id: str = "casLoginForm"
     username: str = ""
@@ -84,7 +84,7 @@ class RadarLocationConfig(BaseModel):
 
 
 class SignConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     number_enabled: bool = True
     radar_enabled: bool = False
     notify_result: bool = True
@@ -204,6 +204,22 @@ def load_config(path: Path | None = None) -> tuple[AppConfig, Path]:
         return AppConfig(), config_path
     data = _normalize_config_data(yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
     return AppConfig.model_validate(data), config_path
+
+
+def load_raw_config(path: Path | None = None) -> tuple[dict[str, Any], Path]:
+    config_path = path or default_config_path()
+    if not config_path.exists():
+        return {}, config_path
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise TypeError(f"Config root must be a mapping: {config_path}")
+    return data, config_path
+
+
+def write_config_data(path: Path, data: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return path
 
 
 def write_default_config(path: Path | None = None, *, force: bool = False) -> Path:

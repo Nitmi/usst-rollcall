@@ -37,14 +37,13 @@ def now_in_timezone(timezone_name: str) -> datetime:
 def build_rollcall_message(account_name: str, rollcall: Rollcall) -> NotificationMessage:
     body = "\n".join(
         [
-            f"Account: {account_name}",
-            f"Course: {rollcall.display_title}",
-            f"Type: {rollcall.type_label}",
-            f"Status: {rollcall.status or 'unknown'}",
-            f"Rollcall ID: {rollcall.key}",
+            f"账号：{account_name}",
+            f"课程：{rollcall.display_title}",
+            f"签到类型：{rollcall.type_label}",
+            "已检测到新的签到任务。",
         ]
     )
-    return NotificationMessage(title="USST rollcall detected", body=body)
+    return NotificationMessage(title="发现签到任务", body=body)
 
 
 def build_error_message(account_name: str, error: TronClassError) -> NotificationMessage:
@@ -69,16 +68,15 @@ def build_sign_message(account_name: str, rollcall: Rollcall, result: SignResult
     status = "success" if result.success else "failed" if result.attempted else "skipped"
     body = "\n".join(
         [
-            f"Account: {account_name}",
-            f"Course: {rollcall.display_title}",
-            f"Type: {rollcall.type_label}",
-            f"Rollcall ID: {rollcall.key}",
-            f"Sign status: {status}",
-            f"Method: {result.method}",
-            f"Message: {result.message}",
+            f"账号：{account_name}",
+            f"课程：{rollcall.display_title}",
+            f"签到类型：{rollcall.type_label}",
+            f"结果：{status}",
+            f"说明：{result.message}",
         ]
     )
-    return NotificationMessage(title="USST rollcall sign result", body=body)
+    title = "自动签到成功" if result.success else "自动签到失败" if result.attempted else "未执行自动签到"
+    return NotificationMessage(title=title, body=body)
 
 
 def notify_error_once(

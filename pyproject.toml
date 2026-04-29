@@ -1,6 +1,6 @@
 [project]
 name = "usst-rollcall"
-version = "0.1.5"
+version = "0.1.6"
 description = "USST TronClass rollcall watcher and notifier"
 readme = "README.md"
 authors = [

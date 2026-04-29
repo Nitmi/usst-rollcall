@@ -11,7 +11,19 @@ from rich.table import Table
 
 from . import __version__
 from .client import TronClassClient, TronClassError
-from .config import AccountConfig, AppConfig, LoginConfig, NotifyConfig, SignConfig, default_config_path, load_config, resolve_data_path, write_default_config
+from .config import (
+    AccountConfig,
+    AppConfig,
+    LoginConfig,
+    NotifyConfig,
+    SignConfig,
+    default_config_path,
+    load_config,
+    load_raw_config,
+    resolve_data_path,
+    write_config_data,
+    write_default_config,
+)
 from .login import LoginError, login as login_with_form
 from .models import LoginResult, NotificationMessage, SignResult
 from .notify import Notifier
@@ -92,6 +104,24 @@ def _notify_channels_label(notify_config: NotifyConfig) -> str:
     return ", ".join(channels) if channels else "none"
 
 
+def _ensure_raw_account(data: dict, account_id: str) -> dict:
+    accounts = data.setdefault("accounts", [])
+    if not isinstance(accounts, list):
+        console.print("[red]accounts must be a list[/red]")
+        raise typer.Exit(1)
+    for account in accounts:
+        if isinstance(account, dict) and account.get("id") == account_id:
+            return account
+    account = {
+        "id": account_id,
+        "name": account_id.capitalize(),
+        "enabled": True,
+        "session_file": f"sessions/{account_id}.json",
+    }
+    accounts.append(account)
+    return account
+
+
 def _print_watch_start(
     config: AppConfig,
     accounts: list[AccountConfig],
@@ -149,9 +179,9 @@ def _try_relogin(
     result = _run_login(config, account, session_store)
     if result.success:
         profile = result.profile_name or result.profile_id or "unknown"
-        console.print(f"[{account.id}] auto login succeeded: {profile}")
+        console.print(f"[{account.id}] 自动登录成功：{profile}")
         return True
-    console.print(f"[yellow][{account.id}] auto login failed: {result.message}[/yellow]")
+    console.print(f"[yellow][{account.id}] 自动登录失败：{result.message}[/yellow]")
     return False
 
 
@@ -165,11 +195,10 @@ def _ensure_account_session(
     login_config = _login_config_for_account(config, account)
     if not login_config.enabled:
         console.print(
-            f"[red][{account.id}] no cached session and login.enabled is false. "
-            "Configure account password login first.[/red]"
+            f"[red][{account.id}] 当前没有可用登录状态，请先配置账号密码。[/red]"
         )
         raise typer.Exit(1)
-    console.print(f"[{account.id}] no cached session, signing in with account password...")
+    console.print(f"[{account.id}] 当前没有缓存登录状态，正在自动登录...")
     if not _try_relogin(config, account, session_store):
         raise typer.Exit(1)
 
@@ -183,13 +212,23 @@ def _process_rollcalls(
     notify: bool,
     sign_config: SignConfig,
     client: TronClassClient,
+    show_empty_result: bool = True,
 ) -> None:
-    console.print(f"[{account.id}] Rollcalls: {len(response_rollcalls)}")
+    if not response_rollcalls:
+        if show_empty_result:
+            console.print(f"[{account.id}] 当前没有签到任务。")
+        return
+
+    console_notifier_enabled = bool(notifier and notifier.config.console.enabled)
+
     for rollcall in response_rollcalls:
         is_new = state_store.upsert_seen(account.id, rollcall)
+        if is_new and not console_notifier_enabled:
+            console.print(f"[{account.id}] 发现签到任务：{rollcall.display_title}（{rollcall.type_label}）")
+        elif not is_new and not console_notifier_enabled:
+            console.print(f"[{account.id}] 仍可处理的签到：{rollcall.display_title}（{rollcall.type_label}）")
         if notify and is_new and notifier:
-            body = f"Account: {account.name}\n{rollcall.model_dump_json(indent=2)}"
-            notifier.send(NotificationMessage(title="USST rollcall detected", body=body))
+            notifier.send(build_rollcall_message(account.name, rollcall))
             state_store.mark_notified(account.id, rollcall.key)
         if sign_config.enabled and not state_store.has_sign_result(account.id, rollcall.key):
             try:
@@ -205,11 +244,12 @@ def _process_rollcalls(
             state_store.mark_sign_result(account.id, rollcall.key, result)
             if notify and notifier and sign_config.notify_result:
                 notifier.send(build_sign_message(account.name, rollcall, result))
-            console.print(f"  sign={result.method}:{result.message}")
-        console.print(
-            f"- [{account.id}] {rollcall.key} {rollcall.display_title} "
-            f"[{rollcall.type_label}] status={rollcall.status}"
-        )
+            if result.success and not (console_notifier_enabled and notify and sign_config.notify_result):
+                console.print(f"[{account.id}] 自动签到成功：{rollcall.display_title}")
+            elif result.attempted and not (console_notifier_enabled and notify and sign_config.notify_result):
+                console.print(f"[{account.id}] 自动签到失败：{rollcall.display_title}，{result.message}")
+            elif not (console_notifier_enabled and notify and sign_config.notify_result):
+                console.print(f"[{account.id}] 未执行自动签到：{rollcall.display_title}，{result.message}")
 
 
 @app.command("init-config")
@@ -229,6 +269,39 @@ def where() -> None:
 @app.command("version")
 def version_command() -> None:
     console.print(f"usst-rollcall {package_version()}")
+
+
+@app.command("set-account")
+def set_account_command(
+    username: Annotated[str, typer.Option(prompt=True, help="学号或账号。")],
+    password: Annotated[str, typer.Option(prompt=True, hide_input=True, help="登录密码。")],
+    account_id: Annotated[str, typer.Option("--account", "-a", help="Account ID.")] = "main",
+    config_path: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+) -> None:
+    raw_config, resolved_config_path = load_raw_config(config_path)
+    if not raw_config and not resolved_config_path.exists():
+        write_default_config(resolved_config_path, force=True)
+        raw_config, resolved_config_path = load_raw_config(resolved_config_path)
+
+    account = _ensure_raw_account(raw_config, account_id)
+    account["enabled"] = True
+    account.setdefault("session_file", f"sessions/{account_id}.json")
+    account["login"] = {
+        **(account.get("login") or {}),
+        "enabled": True,
+        "username": username,
+        "password": password,
+        "password_env": None,
+    }
+    account["sign"] = {
+        **(account.get("sign") or {}),
+        "enabled": True,
+    }
+
+    write_config_data(resolved_config_path, raw_config)
+    console.print(f"账号已保存：{account_id}")
+    console.print("已默认开启自动登录和自动签到。")
+    console.print(f"配置文件：{resolved_config_path}")
 
 
 @app.command("accounts")
@@ -287,10 +360,10 @@ def login_command(
     session_store = _session_store(resolved_config_path, account)
     result = _run_login(config, account, session_store, force=True)
     if not result.success:
-        console.print(f"[red]Login failed for account {account.id}: {result.message}[/red]")
+        console.print(f"[red]{account.id} 登录失败：{result.message}[/red]")
         raise typer.Exit(1)
     profile = result.profile_name or result.profile_id or "<unknown>"
-    console.print(f"Login succeeded for account {account.id}: {profile}")
+    console.print(f"{account.id} 登录成功：{profile}")
 
 
 @app.command("poll-once")
@@ -321,6 +394,7 @@ def poll_once_command(
                             notify=notify,
                             sign_config=sign_config,
                             client=client,
+                            show_empty_result=True,
                         )
                 except TronClassError as exc:
                     if exc.status_code != 401 or not _try_relogin(config, account, session_store):
@@ -335,6 +409,7 @@ def poll_once_command(
                             notify=notify,
                             sign_config=sign_config,
                             client=client,
+                            show_empty_result=True,
                         )
     except TronClassError as exc:
         console.print(f"[red]{exc}[/red]")

@@ -4,6 +4,8 @@
 
 它可以在后台定时检查是否有课程签到，并在发现签到时发送通知。你也可以按需开启自动签到。
 
+支持在公网环境运行，不要求必须连接校园网。
+
 ## 功能
 
 - 检查课程签到
@@ -14,6 +16,7 @@
 - 支持数字签到自动提交
 - 支持雷达签到自动提交，但需要自己配置坐标
 - 默认只在 `07:30-20:30` 检查，减少无意义请求
+- 默认每 1 分钟检查一次
 
 二维码签到暂不支持自动提交。
 
@@ -46,13 +49,54 @@ usst-rollcall version
 
 ## 第一次使用
 
-### 1. 生成配置文件
+### 1. 直接写入账号密码
+
+最简单的方法是直接用命令写入账号密码：
 
 ```bash
-usst-rollcall init-config
+usst-rollcall set-account
 ```
 
-查看配置文件位置：
+或者手动编辑配置文件：
+
+```yaml
+accounts:
+  - id: main
+    name: Main
+    enabled: true
+    session_file: sessions/main.json
+    login:
+      enabled: true
+      username: 你的学号或账号
+      password: 你的密码
+    sign:
+      enabled: true
+```
+
+这个命令会默认帮你：
+
+- 开启自动登录
+- 开启自动签到
+- 保存到 `main` 账号
+
+可以先主动测试一次登录：
+
+```bash
+usst-rollcall login
+usst-rollcall login-status
+```
+
+程序会自动维护内部 session 缓存，你不需要手动处理。
+
+### 2. 测试能否查询签到
+
+```bash
+usst-rollcall poll-once
+```
+
+如果能正常输出课程签到数量，说明配置基本可用。
+
+### 3. 查看配置文件位置
 
 ```bash
 usst-rollcall where
@@ -65,44 +109,21 @@ usst-rollcall where
 | Windows | `%LOCALAPPDATA%\usst-rollcall\config.yaml` |
 | Linux / VPS | `~/.config/usst-rollcall/config.yaml` |
 
-### 2. 填入账号密码
+### 4. 手动生成默认配置文件
 
-在配置文件中填写账号密码登录信息：
-
-```yaml
-accounts:
-  - id: main
-    name: Main
-    enabled: true
-    session_file: sessions/main.json
-    login:
-      enabled: true
-      username: 你的学号或账号
-      password: 你的密码
-```
-
-可以先主动测试一次登录：
+如果你只想先生成模板，再自己慢慢编辑，也可以执行：
 
 ```bash
-usst-rollcall login
-usst-rollcall login-status
+usst-rollcall init-config
 ```
-
-程序会自动维护内部 session 缓存，你不需要手动处理。
-
-### 3. 测试能否查询签到
-
-```bash
-usst-rollcall poll-once
-```
-
-如果能正常输出课程签到数量，说明配置基本可用。
 
 ## 配置通知
 
 打开配置文件，找到对应账号下面的 `notify`。
 
 ### Bark 示例
+
+iOS 用户推荐直接使用 Bark，配置最简单，推送也最稳定。
 
 ```yaml
 accounts:
@@ -143,22 +164,22 @@ usst-rollcall watch
 
 默认情况下，程序只会在 `07:30-20:30` 之间请求签到接口。其他时间程序会保持运行，但不会检查签到。
 
-默认按 `Asia/Shanghai` 时区判断活跃时间。如果你的运行环境时区特殊，可以在配置文件里修改：
-
-```yaml
-watch:
-  active_start: "07:30"
-  active_end: "20:30"
-  timezone: Asia/Shanghai
-```
-
 启动后会先显示运行摘要，你可以看到当前是否启用了 `--all`、是否启用了 `--sign`、正在监控哪些账号。
 
 如果部署在 VPS，建议用 `supervisor`、`systemd`、Docker 或其他进程管理工具守护运行。
 
 ## 开启自动签到
 
-自动签到默认关闭。需要你手动打开配置文件，把对应账号的 `sign.enabled` 改为 `true`：
+自动签到默认开启。如果你不想自动签到，可以手动关闭：
+
+```yaml
+accounts:
+  - id: main
+    sign:
+      enabled: false
+```
+
+如果你想保留自动签到，默认配置已经是：
 
 ```yaml
 accounts:
@@ -244,6 +265,7 @@ usst-rollcall watch --all
 | `usst-rollcall where` | 查看配置文件位置 |
 | `usst-rollcall version` | 查看当前安装版本 |
 | `usst-rollcall --version` | 查看当前安装版本 |
+| `usst-rollcall set-account` | 通过命令写入账号密码，并默认开启自动登录和自动签到 |
 | `usst-rollcall accounts` | 查看账号列表 |
 | `usst-rollcall login` | 使用配置中的账号密码重新登录并刷新 session |
 | `usst-rollcall login-status` | 查看当前账号是否已配置自动登录、是否已有缓存 session |
@@ -295,6 +317,7 @@ a.oxidizing172@aleeas.com
 先执行：
 
 ```bash
+usst-rollcall set-account
 usst-rollcall login
 usst-rollcall login-status
 ```
